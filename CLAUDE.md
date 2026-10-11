@@ -65,7 +65,7 @@ Startup mode comes from `GAW_MODE` (default `replay`: the newest 3 h of `data/re
 
 ```
 adsb.fi + adsb.lol --> LivePoller --+                      +--> jamming.classify_cells --> cells (GeoJSON)
-                                    +--> Injector.apply --> Window (memory, 30 min) --+--> spoofing / warning / incidents (TODO)
+                                    +--> Injector.apply --> Window (memory, 30 min) --+--> spoofing / warning / incidents / evaluate
 data/recordings ---> Replayer ------+   (simulated attacks)                          +--> tick payload --> /ws (every 5 s)
                        (Clock follows replay time)          SQLite: ground truth, sentinel, incidents
 ```
