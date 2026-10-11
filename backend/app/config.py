@@ -92,7 +92,7 @@ class DetectionConfig(BaseModel):
     cluster_alt_spread_ft: float = 3000.0
     track_mismatch_deg: float = 60.0
     track_mismatch_min_gs_kt: float = 150.0
-    spoof_cell_min_flags: int = Field(1, ge=1, le=5)
+    spoof_cell_min_flags: int = Field(2, ge=1, le=5)  # weak-evidence aircraft needed before a cell turns purple
 
     # §6.3 early warning
     warn_horizon_s: int = 900

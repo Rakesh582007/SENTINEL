@@ -105,6 +105,7 @@ Cell states: `insufficient` (< min aircraft), `clear`, `degraded`, `jammed`, `sp
 - **D14 Sentinel status adds `SEARCHING`** (no fix / no sky view) so an indoor box doesn't read as jamming.
 - **D15 `recovery_jump` is not spoofing.** Real data (FDX5384): during GPS loss the position froze, then leapt 13 km in 22 s when GPS returned. A jump with a weak NIC/NACp at either end is logged as `recovery_jump` and never paints a cell purple (`spoofing.SPOOF_REASONS`).
 - **D16 Altitude offset is compared as a fraction of altitude** (GPS minus baro grows with height, ~+4%), so a normal low aircraft isn't flagged against high peers.
+- **D18 Strong vs weak spoofing evidence.** First live run (11 Oct 13:50) raised two inland one-aircraft spoofing alarms. Now `impossible_jump` / `colocation_cluster` can turn a cell purple alone; `alt_offset_outlier` / `track_mismatch` must repeat on the aircraft and need `spoof_cell_min_flags` (2) aircraft per cell. A judge's spoof with `offset_km` > 0 still turns its cell purple; an altitude-only spoof flags the aircraft, not the cell.
 - **D17 Attacks act only from their start time and expire only by duration**; evaluation never calls an unmatched alarm "false", because on live data it may be real.
 
 ## Measured facts (Sun 11 Oct 2026, 12:14-12:36 IST)

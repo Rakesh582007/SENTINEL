@@ -65,3 +65,28 @@ def test_simulated_spoof_is_caught():
     real = track("aaaaaa")
     seen = [inj.apply([r], now=r.ts)[0] for r in real]
     assert "impossible_jump" in flag_aircraft(seen, CFG)["aaaaaa"]
+
+
+def test_one_aircraft_with_weak_evidence_does_not_turn_a_cell_purple():
+    bad = make("target", 31.5, 75.2, alt_baro=35000, alt_geom=33000)
+    recs = peers() + [bad]
+    flags = flag_aircraft(recs, CFG)
+    assert "alt_offset_outlier" in flags["target"]
+    assert spoofed_cells(flags, recs, CFG) == {}  # shown on the aircraft, not a purple cell
+    bad2 = make("target2", 31.5, 75.21, alt_baro=35000, alt_geom=33000)
+    assert sum(spoofed_cells(flag_aircraft(recs + [bad2], CFG), recs + [bad2], CFG).values()) == 2
+
+
+def test_single_track_glitch_is_ignored_but_repeated_mismatch_is_flagged():
+    rs = track("dddddd", n=8)
+    rs[3].track = 120.0  # one odd reading
+    assert "dddddd" not in flag_aircraft(rs, CFG)
+    for r in rs[3:]:
+        r.track = 120.0  # keeps claiming east while flying north
+    assert "track_mismatch" in flag_aircraft(rs, CFG)["dddddd"]
+
+
+def test_strong_evidence_alone_still_turns_the_cell_purple():
+    rs = track("aaaaaa")
+    rs[3].lat += 0.25
+    assert sum(spoofed_cells(flag_aircraft(rs, CFG), rs, CFG).values()) == 1

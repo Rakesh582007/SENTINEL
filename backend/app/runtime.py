@@ -281,7 +281,7 @@ class Runtime:
             self.flag_log.append({"ts": now, "hex": h, "reasons": flags[h]})
         self._prev_flagged = spoof_flagged
         for cell, n_flagged in spoofing.spoofed_cells(flags, recs, cfg).items():
-            if n_flagged >= cfg.spoof_cell_min_flags:
+            if n_flagged >= 1:  # spoofed_cells already applied the strong/weak rule
                 c = cells.get(cell) or CellStat(h3=cell, n_aircraft=n_flagged, n_bad=0, frac_bad=0.0, lower_bound=0.0, state="spoofing")
                 c.state = "spoofing"
                 cells[cell] = c
