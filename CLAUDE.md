@@ -51,7 +51,7 @@ Startup mode comes from `GAW_MODE` (default `replay`: the newest 3 h of `data/re
 | `detect/incidents.py` (+ SQLite) and `report/pdf.py` | done + tests |
 | `detect/evaluate.py` (detected / missed / undetectable / pending / unexplained) | done + tests |
 | `sentinel.py` server re-check (baseline SNR, fix loss, drift) | done + tests |
-| `web/` | **not started** (see `web/README.md`) |
+| `web/` | **not started** (full spec: `docs/FRONTEND_HANDOVER.md`) |
 | `firmware/` | not here (see `firmware/README.md`) |
 
 ## Next tasks, in order

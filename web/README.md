@@ -9,3 +9,5 @@ React + Vite + Tailwind + react-leaflet (HANDOVER §9). Build it against the bac
 Must-haves from the spec: state colours always paired with text (clear / degraded / jammed / spoofing / insufficient), the "INJECTED TEST ATTACK" badge on anything with `injected`, data credits for adsb.fi and adsb.lol, and a plain dark background if map tiles fail (venue Wi-Fi). Check how the basemap draws the J&K boundary before the demo.
 
 Attack Simulator: while the judge drags the jammer, call `GET /api/attacks/preview?lat=&lon=&radius_km=` and show `busiest_cell_aircraft` and `hint`, so an empty area explains itself instead of looking broken.
+
+**Full frontend spec: [`docs/FRONTEND_HANDOVER.md`](../docs/FRONTEND_HANDOVER.md).**
