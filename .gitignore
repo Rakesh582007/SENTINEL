@@ -1,0 +1,26 @@
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+venv/
+*.egg-info/
+
+# Data: recordings are 5-10 MB per hour, keep them on the demo laptop (or a shared drive), not in git
+data/recordings/*
+!data/recordings/.gitkeep
+data/*.db
+data/*.db-*
+
+# Local settings
+.env
+
+# Frontend
+web/node_modules/
+web/dist/
+
+# OS / editors
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
