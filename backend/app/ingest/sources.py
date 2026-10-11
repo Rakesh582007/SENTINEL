@@ -25,6 +25,9 @@ Facts checked the same day:
   non-commercial use, and the UI must credit adsb.fi with a link.
 - adsb.lol: rate limits are dynamic; the project says an API key (obtained
   by feeding) will be required "in the future" -> keep adsb.fi working.
+  At 3 requests per 10 s it answered HTTP 429 three times in 12 minutes, and
+  in North India it adds only 1-2 aircraft that adsb.fi does not see, so it is
+  polled every 3rd sweep (SOURCE_EVERY_N_SWEEPS).
 - airplanes.live returned HTTP 403 from a cloud sandbox; may work from a
   home connection, so it is available but off by default.
 """
@@ -44,6 +47,15 @@ SOURCES: dict[str, str] = {
     "airplanes.live": "https://api.airplanes.live/v2/point/{lat}/{lon}/{radius}",
 }
 DEFAULT_SOURCES: tuple[str, ...] = ("adsb.fi", "adsb.lol")
+
+# Poll a source only on every Nth sweep (1 = every sweep).
+SOURCE_EVERY_N_SWEEPS: dict[str, int] = {"adsb.fi": 1, "adsb.lol": 3, "airplanes.live": 3}
+
+
+def due(source: str, sweep_no: int) -> bool:
+    """Is this source polled on sweep number sweep_no (1-based)?"""
+    return (sweep_no - 1) % SOURCE_EVERY_N_SWEEPS.get(source, 1) == 0
+
 
 ATTRIBUTION: dict[str, str] = {
     "adsb.fi": "https://adsb.fi",

@@ -26,7 +26,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO_ROOT / "backend"))
 
 from app.ingest.recording import append_line, make_line, new_run_id  # noqa: E402
-from app.ingest.sources import DEFAULT_SOURCES, SOURCES, USER_AGENT, build_url, fetch_json  # noqa: E402
+from app.ingest.sources import DEFAULT_SOURCES, SOURCE_EVERY_N_SWEEPS, SOURCES, USER_AGENT, build_url, due, fetch_json  # noqa: E402
 from app.regions import DEFAULT_REGION, REGIONS, SWEEP_INTERVAL_S, get_region, parse_points  # noqa: E402
 
 LOW_NACP = 7  # same starting threshold as config.DetectionConfig.nacp_bad; only used for the console summary
@@ -88,6 +88,7 @@ def main() -> int:
 
     print(f"GPS Attack Watch recorder | run {run_id} | {len(points)} circle(s) x {len(sources)} source(s) every {interval:.0f}s")
     print(f"  circles: {', '.join(f'{p.name}({p.lat},{p.lon},{p.radius_nm}NM)' for p in points)}")
+    print(f"  cadence: {', '.join(f'{s} every {SOURCE_EVERY_N_SWEEPS.get(s, 1)} sweep(s)' for s in sources)}")
     print(f"  output:  {out}")
     print(f"  power:   {keep_awake()}  (keep the charger in; set lid-close to 'Do nothing')")
     print("  receive-only: downloads public aggregated ADS-B data; transmits nothing.\n")
@@ -108,7 +109,7 @@ def main() -> int:
             for point in points:
                 answers = []
                 for source in sources:
-                    if time.time() < cooldown_until[source]:
+                    if time.time() < cooldown_until[source] or not due(source, sweeps):
                         continue
                     status, data, err, ms = fetch_json(build_url(source, point), user_agent=USER_AGENT)
                     poll_ts = time.time()

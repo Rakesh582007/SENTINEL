@@ -1,0 +1,17 @@
+{
+  "now": 1791701082000,
+  "total": 8,
+  "msg": "No error",
+  "ctime": 1791701082000,
+  "ptime": 0,
+  "ac": [
+    {"hex": "800C6D", "type": "adsb_icao", "flight": "IGO7275 ", "alt_baro": 15975, "alt_geom": 16800, "gs": 255.2, "track": 212.2, "lat": 29.193146, "lon": 77.329595, "nic": 8, "nac_p": 10, "version": 2, "seen": 0.9, "seen_pos": 0.905},
+    {"hex": "801527", "type": "adsb_icao", "alt_geom": 38400, "gs": 442.6, "track": 191.34, "lat": 29.689911, "lon": 74.903782, "nic": 8, "version": 2, "seen": 2.5, "seen_pos": 42.303},
+    {"hex": "abc123", "type": "adsb_icao", "flight": "AIC101", "alt_baro": "ground", "gs": 3.1, "lat": 31.70, "lon": 74.80, "nic": 8, "nac_p": 9, "seen": 0.4, "seen_pos": 0.4},
+    {"hex": "def456", "type": "adsb_icao", "flight": "  ", "alt_baro": 33000, "alt_geom": 34500, "calc_track": 88.0, "lat": 31.2, "lon": 75.5, "nic": 7, "nac_p": 8, "seen": 1.0, "seen_pos": 1.2},
+    {"hex": "aa0001", "type": "adsb_icao", "alt_baro": 31000, "nic": 0, "nac_p": 0, "seen": 1.1, "lastPosition": {"lat": 31.9, "lon": 74.6, "nic": 0, "rc": 0, "seen_pos": 75.0}},
+    {"hex": "aa0002", "type": "mlat", "alt_baro": 12000, "lat": 30.9, "lon": 75.8, "seen": 0.5, "seen_pos": 0.6, "mlat": ["lat", "lon"]},
+    {"hex": "aa0003", "type": "adsb_icao", "alt_baro": true, "gs": false, "lat": 30.0, "lon": 76.0, "nic": true, "nac_p": 7, "seen": 0.2, "seen_pos": 0.2, "gpsOkBefore": 1791700900500},
+    {"type": "adsb_icao", "lat": 30.0, "lon": 76.0}
+  ]
+}

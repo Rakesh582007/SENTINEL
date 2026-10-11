@@ -4,7 +4,8 @@ Team **Ethicals** · SEDHACKS'26 · Domain 01: Space Applications & Defence Tech
 
 Detects GPS **jamming** and **spoofing** over India from public aircraft (ADS-B) data, warns flights heading into affected areas, and auto-generates incident reports. Receive-only: nothing in this project ever transmits a radio signal.
 
-Full spec: [`docs/HANDOVER.md`](docs/HANDOVER.md).
+- Full spec: [`docs/HANDOVER.md`](docs/HANDOVER.md)
+- Current status, decisions and measured facts: [`CLAUDE.md`](CLAUDE.md) (also what Claude Code reads first)
 
 ---
 
@@ -27,6 +28,44 @@ On Windows, use `py` if `python` isn't found. Plug the charger in, and set *Cont
 - Restarting is safe; every run writes new files.
 
 Backup idea: the recorder is pure Python standard library, so a teammate's laptop (or an Android phone with Termux + Python) can run a second copy.
+
+## 2. Run the backend
+
+```bash
+cd backend
+pip install -r requirements.txt
+uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+```
+
+- Interactive API docs: http://localhost:8000/docs · live feed: `ws://localhost:8000/ws`
+- Starts in **replay** mode on the newest 3 hours of `data/recordings` (or the bundled 30-minute sample in `data/sample` if you have none yet). Switch to live with `POST /api/mode {"mode": "live"}`, and stop `record.py` first: live mode records by itself.
+- `--host 0.0.0.0` lets the Ground Sentinel ESP32 reach the laptop over the hotspot.
+
+## 3. Check what you recorded
+
+```bash
+cd backend
+python scripts/inspect_recording.py          # coverage, GPS health, detectability, busiest cells
+pytest                                        # 50 tests
+```
+
+The "busiest cells" list is where a judge's simulated jammer will visibly turn cells red. Near Amritsar, traffic is often too thin for the crowd method; that is a real limit of free data, and the pitch should say so.
+
+## Layout
+
+```
+backend/app/        FastAPI app: ingest (poller, replay, injector), detect (jamming done; spoofing, warning,
+                    incidents, evaluate TODO), api, runtime, config
+backend/scripts/    record.py (stdlib recorder), inspect_recording.py
+backend/tests/      pytest + fixtures (one real adsb.fi snapshot)
+data/recordings/    your recordings (git-ignored)    data/sample/  30-minute sample for replay out of the box
+docs/HANDOVER.md    full spec                          scenarios/    scripted attack scenarios
+web/                dashboard (to build)               firmware/     Ground Sentinel notes
+```
+
+## Team workflow
+
+`main` stays runnable. Work on a `feat/<thing>` branch, run `pytest`, push, open a pull request; Rakesh merges.
 
 ## Data credits
 

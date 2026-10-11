@@ -1,0 +1,279 @@
+"""REST API (HANDOVER §8 and §7.1). The WebSocket lives in main.py.
+
+Endpoints marked TODO answer with an empty list or HTTP 501 until their
+detector module is implemented, so the frontend can be built against the
+final shapes today.
+"""
+from __future__ import annotations
+
+import calendar
+import json
+import time
+
+from fastapi import APIRouter, HTTPException, Request
+from fastapi.responses import Response
+from pydantic import ValidationError
+
+from app.config import get_detection, reset_detection, update_detection
+from app.detect.evaluate import evaluate
+from app.ingest.recording import list_recordings
+from app.ingest.replay import stamp_of
+from app.models import AttackIn, AttackPatch, JammingIn, ModeIn, RegionIn, SeekIn, SentinelIn, SpeedIn
+from app.regions import REGIONS
+from app.report.pdf import incident_pdf
+from app.runtime import Runtime
+
+router = APIRouter(prefix="/api")
+
+
+def rt_of(request: Request) -> Runtime:
+    return request.app.state.rt
+
+
+# ---------------------------------------------------------------- status & map
+@router.get("/health")
+def health(request: Request):
+    return rt_of(request).health()
+
+
+@router.get("/aircraft")
+def aircraft(request: Request):
+    rt = rt_of(request)
+    return (rt.last_tick or rt.compute_tick())["aircraft"]
+
+
+@router.get("/cells")
+def cells(request: Request):
+    rt = rt_of(request)
+    return (rt.last_tick or rt.compute_tick())["cells"]
+
+
+@router.get("/alerts")
+def alerts(request: Request, active: bool = True):
+    rt = rt_of(request)
+    return (rt.last_tick or {}).get("alerts", [])  # TODO(warning.py) fills these
+
+
+# ---------------------------------------------------------------- mode, region, replay
+@router.post("/mode")
+async def set_mode(body: ModeIn, request: Request):
+    rt = rt_of(request)
+    try:
+        await rt.start(body.mode, files=body.recordings, speed=body.speed, start_ts=body.start_ts)
+    except FileNotFoundError as e:
+        raise HTTPException(404, str(e)) from e
+    return rt.health()
+
+
+@router.get("/regions")
+def regions(request: Request):
+    rt = rt_of(request)
+    return {
+        "current": rt.region_name,
+        "points": [p.as_dict() for p in rt.points],
+        "presets": {name: [p.as_dict() for p in pts] for name, pts in REGIONS.items()},
+    }
+
+
+@router.post("/region")
+def set_region(body: RegionIn, request: Request):
+    rt = rt_of(request)
+    try:
+        rt.set_region(body.name, body.points)
+    except (KeyError, ValueError) as e:
+        raise HTTPException(422, str(e)) from e
+    return {"current": rt.region_name, "points": [p.as_dict() for p in rt.points],
+            "note": "applies to live polling from the next sweep; replay plays whatever was recorded"}
+
+
+@router.get("/recordings")
+def recordings(request: Request):
+    rt = rt_of(request)
+    out = []
+    for p in list_recordings(rt.settings.recordings_dir):
+        stamp = stamp_of(p)
+        hour_ist = None
+        try:
+            utc = calendar.timegm(time.strptime(stamp, "%Y%m%d_%H"))
+            hour_ist = time.strftime("%d %b %H:%M IST", time.gmtime(utc + 5.5 * 3600))
+        except ValueError:
+            pass
+        out.append({"name": p.name, "bytes": p.stat().st_size, "utc_hour": stamp, "starts": hour_ist})
+    return out
+
+
+def _replayer(request: Request):
+    rt = rt_of(request)
+    if rt.replayer is None:
+        raise HTTPException(409, "not in replay mode")
+    return rt.replayer
+
+
+@router.get("/replay")
+def replay_status(request: Request):
+    return _replayer(request).status()
+
+
+@router.post("/replay/seek")
+def replay_seek(body: SeekIn, request: Request):
+    rep = _replayer(request)
+    rep.seek(body.ts)
+    return rep.status()
+
+
+@router.post("/replay/speed")
+def replay_speed(body: SpeedIn, request: Request):
+    rep = _replayer(request)
+    rep.set_speed(body.speed)
+    return rep.status()
+
+
+@router.post("/replay/pause")
+def replay_pause(request: Request):
+    rep = _replayer(request)
+    rep.paused = True
+    return rep.status()
+
+
+@router.post("/replay/play")
+def replay_play(request: Request):
+    rep = _replayer(request)
+    rep.paused = False
+    return rep.status()
+
+
+# ---------------------------------------------------------------- detection sensitivity sliders
+@router.get("/config/detection")
+def get_detection_config():
+    return get_detection().model_dump()
+
+
+@router.patch("/config/detection")
+def patch_detection_config(changes: dict):
+    try:
+        return update_detection(changes).model_dump()
+    except ValidationError as e:
+        raise HTTPException(422, json.loads(e.json(include_url=False))) from e
+
+
+@router.delete("/config/detection")
+def reset_detection_config():
+    return reset_detection().model_dump()
+
+
+# ---------------------------------------------------------------- attack simulator
+@router.get("/attacks")
+def list_attacks(request: Request):
+    rt = rt_of(request)
+    now = rt.clock.now()
+    return [a.to_dict(now) for a in rt.injector.attacks.values()]
+
+
+@router.get("/attacks/preview")
+def preview_attack(lat: float, lon: float, radius_km: float, request: Request):
+    """How many aircraft a jammer here would touch (show it while the judge drags)."""
+    return rt_of(request).preview_circle(lat, lon, radius_km)
+
+
+@router.post("/attacks")
+def create_attack(body: AttackIn, request: Request):
+    rt = rt_of(request)
+    now = rt.clock.now()
+    if isinstance(body, JammingIn):
+        a = rt.injector.add_jamming(body.center, body.radius_km, body.strength, body.position_loss, body.duration_s, now)
+        extra = rt.preview_circle(body.center[0], body.center[1], body.radius_km)
+    else:
+        hex_id = rt.pick_random_aircraft() if body.hex == "random" else body.hex.lower()
+        if not hex_id:
+            raise HTTPException(409, "no airborne aircraft available to spoof right now")
+        a = rt.injector.add_spoof(hex_id, body.offset_km, body.bearing_deg, body.alt_offset_ft, body.duration_s, now)
+        extra = {}
+    rt.persist_ground_truth()
+    return {"attack_id": a.id, "attack": a.to_dict(now), **extra}
+
+
+@router.patch("/attacks/{attack_id}")
+def patch_attack(attack_id: str, body: AttackPatch, request: Request):
+    rt = rt_of(request)
+    if attack_id not in rt.injector.attacks:
+        raise HTTPException(404, f"no attack {attack_id}")
+    try:
+        a = rt.injector.update(attack_id, body.model_dump(exclude_unset=True), rt.clock.now())
+    except ValueError as e:
+        raise HTTPException(422, str(e)) from e
+    rt.persist_ground_truth()
+    return a.to_dict(rt.clock.now())
+
+
+@router.delete("/attacks/{attack_id}")
+def delete_attack(attack_id: str, request: Request):
+    rt = rt_of(request)
+    a = rt.injector.remove(attack_id, rt.clock.now())
+    if a is None:
+        raise HTTPException(404, f"no attack {attack_id}")
+    restored = rt.window.restore_injected(attack_id)
+    rt.persist_ground_truth()
+    return {"deleted": attack_id, "records_restored": restored}
+
+
+@router.delete("/attacks")
+def reset_attacks(request: Request):
+    rt = rt_of(request)
+    ids = rt.injector.reset(rt.clock.now())
+    restored = sum(rt.window.restore_injected(i) for i in ids)
+    rt.persist_ground_truth()
+    return {"deleted": ids, "records_restored": restored}
+
+
+# ---------------------------------------------------------------- incidents, report, evaluation (TODO modules)
+@router.get("/incidents")
+def incidents(request: Request):
+    return rt_of(request).incidents.summary()  # TODO(incidents.py)
+
+
+@router.get("/incidents/{incident_id}")
+def incident(incident_id: str, request: Request):
+    inc = rt_of(request).incidents.get(incident_id)
+    if inc is None:
+        raise HTTPException(404, f"no incident {incident_id}")
+    return inc
+
+
+@router.get("/incidents/{incident_id}/report.pdf")
+def incident_report(incident_id: str, request: Request):
+    inc = rt_of(request).incidents.get(incident_id)
+    if inc is None:
+        raise HTTPException(404, f"no incident {incident_id}")
+    try:
+        pdf = incident_pdf(inc)
+    except NotImplementedError as e:
+        raise HTTPException(501, str(e)) from e
+    return Response(pdf, media_type="application/pdf",
+                    headers={"Content-Disposition": f'attachment; filename="incident-{incident_id}.pdf"'})
+
+
+@router.get("/evaluation")
+def evaluation(request: Request):
+    rt = rt_of(request)
+    coverage = {a.id: a.max_aircraft_inside for a in rt.injector.attacks.values()}
+    try:
+        return evaluate(rt.injector.ground_truth, rt.detections, get_detection(), rt.clock.now(), coverage)
+    except NotImplementedError as e:
+        raise HTTPException(501, {"error": str(e), "ground_truth": rt.injector.ground_truth, "detections": rt.detections}) from e
+
+
+# ---------------------------------------------------------------- ground sentinel
+@router.post("/sentinel")
+def sentinel_post(body: SentinelIn, request: Request):
+    entry = rt_of(request).add_sentinel(body.model_dump())
+    return {"ok": True, "status": entry["status"], "recv_ts": entry["recv_ts"]}
+
+
+@router.get("/sentinel/latest")
+def sentinel_latest(request: Request):
+    return rt_of(request).sentinel.latest(time.time())
+
+
+@router.get("/sentinel/history")
+def sentinel_history(request: Request, id: str = "sentinel-1", minutes: float = 10):
+    return rt_of(request).sentinel.history(id, minutes, time.time())
