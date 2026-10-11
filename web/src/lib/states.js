@@ -51,6 +51,13 @@ export const BAD_REASON = {
   gps_lost_flag: 'Aggregator saw GPS loss',
 }
 
+export const BAD_SHORT = {
+  low_nacp: 'Low NACp',
+  low_nic: 'Low NIC',
+  position_lost: 'Position lost',
+  gps_lost_flag: 'GPS loss flag',
+}
+
 // detect/spoofing.py reason codes
 export const SPOOF_REASON = {
   impossible_jump: 'Impossible position jump',

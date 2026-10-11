@@ -30,6 +30,10 @@ export const useStore = create((set, get) => ({
   basemap: 'outline', // outline | tiles
   setBasemap: (basemap) => set({ basemap }),
 
+  // Current detection thresholds (GET /api/config/detection); refreshed by the sensitivity panel.
+  detection: null,
+  setDetection: (detection) => set({ detection }),
+
   evaluationOpen: false,
   setEvaluationOpen: (evaluationOpen) => set({ evaluationOpen }),
 

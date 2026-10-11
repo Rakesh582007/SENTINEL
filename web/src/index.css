@@ -198,6 +198,33 @@ body {
   letter-spacing: 0.04em;
 }
 
+.zone-label {
+  pointer-events: none;
+  position: absolute;
+  left: 0;
+  top: 0;
+  transform: translate(-50%, -100%) translateY(-4px);
+  white-space: nowrap;
+  text-align: center;
+  font-size: 12px;
+  line-height: 1.25;
+  color: #8f1f23;
+  background: rgba(251, 248, 241, 0.92);
+  border: 1px dashed #b5292e;
+  border-radius: 6px;
+  padding: 2px 7px;
+}
+.zone-label .inj,
+.attack-label .inj {
+  display: inline-block;
+  border-radius: 3px;
+  padding: 0 4px;
+  background: var(--signal);
+  color: #2b1003;
+  font: 700 9px/1.5 B612, Consolas, monospace;
+  letter-spacing: 0.04em;
+}
+
 .ac-icon {
   position: absolute;
   left: 0;
