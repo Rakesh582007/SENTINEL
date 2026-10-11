@@ -38,7 +38,7 @@ uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
 ```
 
 - Interactive API docs: http://localhost:8000/docs · live feed: `ws://localhost:8000/ws`
-- Starts in **replay** mode on the newest 3 hours of `data/recordings` (or the bundled 30-minute sample in `data/sample` if you have none yet). Switch to live with `POST /api/mode {"mode": "live"}`, and stop `record.py` first: live mode records by itself.
+- Starts in **replay** mode on the newest 3 hours of `data/recordings` (or the bundled 19-minute sample in `data/sample` if you have none yet). Switch to live with `POST /api/mode {"mode": "live"}`, and stop `record.py` first: live mode records by itself.
 - `--host 0.0.0.0` lets the Ground Sentinel ESP32 reach the laptop over the hotspot.
 
 ## 3. Check what you recorded
@@ -58,7 +58,7 @@ backend/app/        FastAPI app: ingest (poller, replay, injector), detect (jamm
                     incidents, evaluate TODO), api, runtime, config
 backend/scripts/    record.py (stdlib recorder), inspect_recording.py
 backend/tests/      pytest + fixtures (one real adsb.fi snapshot)
-data/recordings/    your recordings (git-ignored)    data/sample/  30-minute sample for replay out of the box
+data/recordings/    your recordings (git-ignored)    data/sample/  19-minute real sample for replay out of the box
 docs/HANDOVER.md    full spec                          scenarios/    scripted attack scenarios
 web/                dashboard (to build)               firmware/     Ground Sentinel notes
 ```
