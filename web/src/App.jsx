@@ -11,6 +11,7 @@ import MapView from './components/map/MapView.jsx'
 import WarningPaths from './components/map/WarningPaths.jsx'
 import AirspacePanel from './components/panels/AirspacePanel.jsx'
 import ReplayControls from './components/panels/ReplayControls.jsx'
+import SentinelView from './components/sentinel/SentinelView.jsx'
 import SimulatorPanel from './components/simulator/SimulatorPanel.jsx'
 import { useStore } from './store.js'
 
@@ -73,7 +74,9 @@ export default function App() {
             {tab === 'airspace' ? <AirspacePanel /> : <SimulatorPanel />}
           </aside>
         ) : (
-          <div className="grid flex-1 place-items-center text-ink-600">Ground Sentinel arrives in step 5.</div>
+          <div className="min-h-0 flex-1">
+            <SentinelView />
+          </div>
         )}
       </main>
       <Toasts />
