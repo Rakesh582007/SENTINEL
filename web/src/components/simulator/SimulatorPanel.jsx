@@ -2,9 +2,11 @@ import { useStore } from '../../store.js'
 import ActiveAttacks from './ActiveAttacks.jsx'
 import JammingControls from './JammingControls.jsx'
 import ScenarioRunner from './ScenarioRunner.jsx'
+import SensitivityPanel from './SensitivityPanel.jsx'
+import SpoofControls from './SpoofControls.jsx'
 
 /** Side panel of the Attack simulator tab (handover §6.2). */
-export default function SimulatorPanel({ spoof = null, sensitivity = null }) {
+export default function SimulatorPanel() {
   const tick = useStore((s) => s.tick)
   return (
     <div className="space-y-6 p-4">
@@ -16,9 +18,9 @@ export default function SimulatorPanel({ spoof = null, sensitivity = null }) {
         </p>
       </div>
       <JammingControls />
-      {spoof}
+      <SpoofControls />
       <ActiveAttacks />
-      {sensitivity}
+      <SensitivityPanel />
       <ScenarioRunner />
     </div>
   )

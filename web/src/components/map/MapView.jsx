@@ -145,7 +145,8 @@ export default function MapView({ overlays = null, bottom = null }) {
   }, [])
 
   return (
-    <div className={`relative h-full w-full ${placing || picking ? 'placing' : ''}`}>
+    <div className={`relative flex h-full w-full flex-col ${placing || picking ? 'placing' : ''}`}>
+      <div className="relative h-[56vh] min-h-[300px] lg:h-auto lg:min-h-0 lg:flex-1">
       <MapContainer
         center={DEFAULT_VIEW.center}
         zoom={DEFAULT_VIEW.zoom}
@@ -170,7 +171,9 @@ export default function MapView({ overlays = null, bottom = null }) {
       <MapControls />
       <StaleBanner />
       <FeedOverlay />
-      <div className="pointer-events-none absolute inset-x-2 bottom-2 z-[900] flex flex-col items-stretch gap-2">
+      </div>
+      {/* Desktop: floats over the bottom of the map. Phone: sits below it so the map stays visible. */}
+      <div className="flex flex-col items-stretch gap-2 p-2 lg:pointer-events-none lg:absolute lg:inset-x-2 lg:bottom-2 lg:z-[900] lg:p-0">
         {bottom}
         <Legend />
       </div>

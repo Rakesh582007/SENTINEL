@@ -173,7 +173,7 @@ export default function TopBar() {
         <span className="hidden text-[14px] text-ink-600 sm:inline">GPS Attack Watch</span>
       </div>
 
-      <nav className="-mb-1.5 flex self-stretch" role="tablist" aria-label="Sections" onKeyDown={onTabKey}>
+      <nav className="-mb-1.5 flex max-w-full self-stretch overflow-x-auto" role="tablist" aria-label="Sections" onKeyDown={onTabKey}>
         {TABS.map((t) => {
           const active = t.id === tab
           return (
@@ -186,7 +186,7 @@ export default function TopBar() {
               aria-controls={`panel-${t.id}`}
               tabIndex={active ? 0 : -1}
               onClick={() => setTab(t.id)}
-              className={`flex items-center border-b-[3px] px-3 pb-2 pt-2 text-[15px] font-semibold transition-colors ${
+              className={`flex shrink-0 items-center whitespace-nowrap border-b-[3px] px-3 pb-2 pt-2 text-[15px] font-semibold transition-colors ${
                 active ? 'border-air-600 text-ink-900' : 'border-transparent text-ink-600 hover:text-ink-900'
               }`}
             >
