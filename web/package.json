@@ -1,0 +1,35 @@
+{
+  "name": "sentinel-web",
+  "private": true,
+  "version": "0.1.0",
+  "description": "SENTINEL / GPS Attack Watch dashboard (Team Ethicals, SEDHACKS'26)",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "dev:standalone": "vite --mode standalone",
+    "build:standalone": "vite build --mode standalone"
+  },
+  "dependencies": {
+    "@fontsource/b612": "5.3.0",
+    "@fontsource/mukta": "5.3.0",
+    "h3-js": "4.5.0",
+    "leaflet": "1.9.4",
+    "react": "18.3.1",
+    "react-dom": "18.3.1",
+    "react-leaflet": "4.2.1",
+    "zustand": "4.5.7"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "4.3.4",
+    "autoprefixer": "10.4.21",
+    "postcss": "8.5.28",
+    "tailwindcss": "3.4.19",
+    "vite": "5.4.21",
+    "vite-plugin-singlefile": "2.3.3"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

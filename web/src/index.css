@@ -1,0 +1,271 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Layout: one-screen app. Top bar, then map (about 70%) beside a side panel (about 30%).
+   Fonts: Mukta (Ek Type, Mumbai) for words; B612 (Airbus cockpit display face) for
+   numbers, callsigns and the wordmark. */
+:root {
+  --sea: #cfe2f1;
+  --land-in: #ece3cd;
+  --land-out: #f4eee0;
+  --ink: #13294b;
+  --chart-blue: #1e5aa8;
+  --signal: #f26b1d;
+  color-scheme: light;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background: #f6f1e5;
+  color: var(--ink);
+  font-family: Mukta, 'Segoe UI', 'Noto Sans', system-ui, sans-serif;
+  font-size: 16px;
+  line-height: 1.45;
+  -webkit-font-smoothing: antialiased;
+}
+
+.tnum {
+  font-variant-numeric: tabular-nums;
+}
+
+:focus-visible {
+  outline: 2px solid var(--chart-blue);
+  outline-offset: 2px;
+}
+
+/* ---------------------------------------------------------------- intro */
+.splash {
+  transition: opacity 0.5s ease;
+}
+.splash-scene {
+  transform-origin: 50% 66%;
+  transition: transform 0.55s cubic-bezier(0.55, 0, 0.9, 0.4);
+}
+.splash-leaving {
+  opacity: 0;
+}
+.splash-leaving .splash-scene {
+  transform: scale(1.35);
+}
+
+.plane-fly {
+  transform-box: view-box;
+  transform-origin: 0 0;
+  transform: translate(800px, 588px) scale(0.02);
+  opacity: 0;
+  animation: plane-approach 2.7s linear 0.15s forwards;
+}
+@keyframes plane-approach {
+  0% { transform: translate(800px, 590px) scale(0.018) rotate(-1.5deg); opacity: 0; }
+  8% { transform: translate(800px, 589px) scale(0.03) rotate(-1.5deg); opacity: 1; }
+  52% { transform: translate(801px, 566px) scale(0.11) rotate(0.8deg); }
+  72% { transform: translate(799px, 532px) scale(0.27) rotate(-0.6deg); }
+  86% { transform: translate(800px, 452px) scale(0.68) rotate(0.3deg); }
+  95% { transform: translate(800px, 270px) scale(1.7) rotate(0deg); opacity: 1; }
+  100% { transform: translate(800px, -260px) scale(3.4) rotate(0deg); opacity: 0; }
+}
+
+.rabbit {
+  opacity: 0;
+  animation: rabbit 1.4s linear infinite;
+}
+@keyframes rabbit {
+  0%, 9% { opacity: 1; }
+  10%, 100% { opacity: 0; }
+}
+
+.splash-title {
+  opacity: 0;
+  transform: translateY(10px);
+  transition: opacity 0.6s ease, transform 0.6s ease;
+}
+.splash-title.is-ready {
+  opacity: 1;
+  transform: none;
+}
+
+.splash-static .plane-fly {
+  animation: none;
+  opacity: 1;
+  transform: translate(800px, 520px) scale(0.22);
+}
+.splash-static .rabbit {
+  animation: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .plane-fly,
+  .rabbit {
+    animation: none !important;
+  }
+  .splash-scene,
+  .splash-title {
+    transition: none !important;
+  }
+}
+
+/* ---------------------------------------------------------------- map */
+.leaflet-container {
+  background: var(--sea);
+  font-family: Mukta, 'Segoe UI', system-ui, sans-serif;
+  font-size: 14px;
+}
+.leaflet-container:focus-visible {
+  outline: 2px solid var(--chart-blue);
+  outline-offset: -2px;
+}
+.leaflet-bar a {
+  color: var(--ink);
+  background: #fbf8f1;
+  border-color: #c8b78f;
+}
+.leaflet-bar a:hover {
+  background: #ddeaf5;
+}
+.leaflet-tooltip.st-tip {
+  background: #fbf8f1;
+  border: 1px solid #c8b78f;
+  border-radius: 6px;
+  color: var(--ink);
+  box-shadow: 0 2px 8px rgba(19, 41, 75, 0.15);
+  padding: 4px 8px;
+  font-size: 13px;
+  line-height: 1.3;
+}
+.leaflet-tooltip.st-tip::before {
+  display: none;
+}
+.leaflet-popup-content-wrapper {
+  background: #fbf8f1;
+  color: var(--ink);
+  border-radius: 10px;
+  box-shadow: 0 2px 4px rgba(19, 41, 75, 0.12), 0 10px 26px rgba(19, 41, 75, 0.16);
+}
+.leaflet-popup-tip {
+  background: #fbf8f1;
+}
+.leaflet-popup-content {
+  margin: 12px 14px;
+  font-size: 14px;
+  line-height: 1.4;
+}
+.leaflet-container a.leaflet-popup-close-button {
+  color: #4b5e78;
+}
+
+/* Divicons we draw ourselves carry no default chrome. */
+.leaflet-div-icon.bare {
+  background: transparent;
+  border: 0;
+}
+
+.map-label {
+  pointer-events: none;
+  white-space: nowrap;
+  font-family: B612, Consolas, monospace;
+  font-weight: 700;
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  line-height: 1.15;
+  text-align: center;
+  transform: translate(-50%, -50%);
+  position: absolute;
+  left: 0;
+  top: 0;
+}
+.map-label .tag {
+  display: inline-block;
+  border-radius: 4px;
+  padding: 1px 5px;
+  background: rgba(251, 248, 241, 0.92);
+  box-shadow: 0 0 0 1px currentColor inset;
+}
+.map-label .inj {
+  display: inline-block;
+  margin-top: 2px;
+  border-radius: 3px;
+  padding: 0 4px;
+  background: var(--signal);
+  color: #2b1003;
+  font-size: 9px;
+  letter-spacing: 0.04em;
+}
+
+.ac-icon {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 26px;
+  height: 26px;
+  transform: translate(-50%, -50%);
+}
+.ac-icon svg {
+  width: 26px;
+  height: 26px;
+  display: block;
+}
+.ac-icon .inj-tag {
+  position: absolute;
+  left: 22px;
+  top: -6px;
+  border-radius: 3px;
+  padding: 0 3px;
+  background: var(--signal);
+  color: #2b1003;
+  font: 700 8.5px/1.35 B612, Consolas, monospace;
+  letter-spacing: 0.03em;
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+.graticule-label {
+  pointer-events: none;
+  white-space: nowrap;
+  font: 400 10.5px/1 B612, Consolas, monospace;
+  color: #4f86c0;
+  transform: translate(-50%, 0);
+  position: absolute;
+  left: 0;
+  top: 0;
+}
+.graticule-label.left {
+  transform: translate(0, -50%);
+}
+
+.apt {
+  pointer-events: none;
+  position: absolute;
+  left: 0;
+  top: 0;
+  transform: translate(-7px, -7px);
+  white-space: nowrap;
+  color: #184b8c;
+  font: 400 10.5px/1.1 B612, Consolas, monospace;
+}
+.apt svg {
+  display: inline-block;
+  vertical-align: middle;
+}
+.apt .name {
+  margin-left: 3px;
+  vertical-align: middle;
+}
+
+/* While the judge places a jammer, the map shows a crosshair. */
+.placing .leaflet-container {
+  cursor: crosshair;
+}
+
+input[type='range'] {
+  accent-color: var(--chart-blue);
+}
+input[type='range'].signal {
+  accent-color: var(--signal);
+}

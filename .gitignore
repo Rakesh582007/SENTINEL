@@ -24,3 +24,6 @@ web/dist/
 Thumbs.db
 .vscode/
 .idea/
+
+# Frontend standalone build (one-file preview)
+web/dist-standalone/
