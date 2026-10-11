@@ -143,3 +143,14 @@ def test_unknown_ids_are_404_not_500(client):
     assert client.get("/api/incidents/inc-1/report.pdf").status_code == 404
     assert client.post("/api/replay/seek", json={"ts": 0}).status_code == 409  # not in replay mode
     assert client.post("/api/region", json={"name": "atlantis"}).status_code == 422
+
+
+def test_replay_starts_in_longest_stretch_not_in_a_gap(tmp_path, client, real_amritsar):
+    append_line(tmp_path, make_line(POLL_TS, "adsb.fi", {"name": "amritsar"}, 200, 300, None, real_amritsar), "r000001")  # a --once test
+    later = POLL_TS + 750  # recorder started 12.5 min later (the real 11 Oct situation)
+    for i in range(30):
+        append_line(tmp_path, make_line(later + 10 * i, "adsb.fi", {"name": "amritsar"}, 200, 300, None, real_amritsar), "r000002")
+    rep = Replayer(client.app.state.rt, sorted(tmp_path.glob("rec_*.jsonl.gz")))
+    rep.load()
+    assert len(rep.segments()) == 2
+    assert later <= rep.default_start() <= later + 290

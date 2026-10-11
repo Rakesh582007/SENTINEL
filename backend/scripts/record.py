@@ -46,6 +46,25 @@ def keep_awake() -> str:
         return f"could not block sleep ({e})"
 
 
+def disable_quickedit() -> str:
+    """Windows consoles pause a program while text is selected (QuickEdit). Turn that off for this window."""
+    if sys.platform != "win32":
+        return ""
+    try:
+        import ctypes
+
+        k32 = ctypes.windll.kernel32
+        handle = k32.GetStdHandle(-10)  # STD_INPUT_HANDLE
+        mode = ctypes.c_uint32()
+        if not k32.GetConsoleMode(handle, ctypes.byref(mode)):
+            return ""
+        enable_quick_edit, enable_extended_flags = 0x0040, 0x0080
+        k32.SetConsoleMode(handle, (mode.value | enable_extended_flags) & ~enable_quick_edit)
+        return "  (clicking this window no longer pauses the recorder)"
+    except Exception:  # pragma: no cover - Windows only
+        return "  (do NOT click inside this window: Windows pauses programs while text is selected)"
+
+
 def summarize(responses: list[dict | None]) -> dict:
     """Merge one point's answers from all sources by hex; count what matters."""
     seen: dict[str, dict] = {}
@@ -91,6 +110,9 @@ def main() -> int:
     print(f"  cadence: {', '.join(f'{s} every {SOURCE_EVERY_N_SWEEPS.get(s, 1)} sweep(s)' for s in sources)}")
     print(f"  output:  {out}")
     print(f"  power:   {keep_awake()}  (keep the charger in; set lid-close to 'Do nothing')")
+    note = disable_quickedit()
+    if note:
+        print(f"  console:{note}")
     print("  receive-only: downloads public aggregated ADS-B data; transmits nothing.\n")
 
     cooldown_until = {s: 0.0 for s in sources}

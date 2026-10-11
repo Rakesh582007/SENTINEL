@@ -27,6 +27,7 @@ from app.records import Record
 log = logging.getLogger("gaw.replay")
 
 SAMPLE_DIR = Path(__file__).resolve().parents[3] / "data" / "sample"
+GAP_S = 120.0  # a pause in the recording longer than this is skipped, not replayed as an empty map
 
 
 def stamp_of(path: Path) -> str:
@@ -90,10 +91,23 @@ class Replayer:
         if not frames:
             self.error = "no usable data in the chosen recordings (run backend/scripts/record.py first)"
 
+    def segments(self) -> list[tuple[float, float]]:
+        """Continuous stretches of data (a recorder test run, a restart or a frozen window leaves gaps)."""
+        segs, start = [], None
+        for i, t in enumerate(self.times):
+            if start is None:
+                start = t
+            elif t - self.times[i - 1] > GAP_S:
+                segs.append((start, self.times[i - 1]))
+                start = t
+        if start is not None:
+            segs.append((start, self.times[-1]))
+        return segs
+
     def default_start(self) -> float:
-        """Start after a full detection window, but leave at least 60% of a short recording to play."""
-        span = self.t_end - self.t_start
-        return self.t_start + min(1200.0, self.rt.settings.window_keep_s, span * 0.4)
+        """Inside the longest stretch of data: after a full detection window, leaving at least 60% to play."""
+        s0, s1 = max(self.segments(), key=lambda s: s[1] - s[0], default=(self.t_start, self.t_end))
+        return s0 + min(1200.0, self.rt.settings.window_keep_s, (s1 - s0) * 0.4)
 
     def seek(self, ts: float) -> float:
         if not self.frames:
@@ -134,6 +148,8 @@ class Replayer:
             if self.paused or self.finished:
                 continue
             target = self.rt.clock.now() + dt * self.speed
+            if self.idx < len(self.frames) and self.frames[self.idx][0] - target > GAP_S:
+                target = self.frames[self.idx][0]  # skip dead air in the recording
             self._emit_until(target)
             self.rt.clock.set(min(target, self.t_end))
             if self.idx >= len(self.frames):
@@ -158,5 +174,6 @@ class Replayer:
             "paused": self.paused,
             "finished": self.finished,
             "frames": len(self.frames),
+            "segments": len(self.segments()) if self.frames else 0,
             "records": self.n_records,
         }
