@@ -14,8 +14,18 @@ import { useStore } from './store.js'
 // Handy in the browser console while developing: __sentinel.getState()
 if (import.meta.env.DEV) window.__sentinel = useStore
 
-createRoot(document.getElementById('root')).render(
-  <React.StrictMode>
-    <App />
-  </React.StrictMode>,
-)
+/* global __STANDALONE__ */
+async function boot() {
+  // Standalone build: start the in-browser copy of the backend first (src/standalone/).
+  if (__STANDALONE__) {
+    const { startStandalone } = await import('./standalone/index.js')
+    await startStandalone()
+  }
+  createRoot(document.getElementById('root')).render(
+    <React.StrictMode>
+      <App />
+    </React.StrictMode>,
+  )
+}
+
+boot()

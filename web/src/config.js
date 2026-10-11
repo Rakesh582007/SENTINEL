@@ -5,7 +5,7 @@
 // then include that origin.
 
 /* global __STANDALONE__ */
-export const STANDALONE = typeof __STANDALONE__ !== 'undefined' && __STANDALONE__
+export const STANDALONE = __STANDALONE__ // set by vite.config.js (true only for --mode standalone)
 
 export const API_BASE = (import.meta.env.VITE_API_BASE || '').replace(/\/$/, '')
 

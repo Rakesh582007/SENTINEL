@@ -96,7 +96,9 @@ function FeedOverlay() {
             <p className="text-[18px] font-bold text-ink-900">No aircraft in the feed right now</p>
             <p className="mt-2 text-[14px] leading-relaxed text-ink-600">
               {tick.mode === 'live'
-                ? 'Live polling is running but no aircraft have arrived yet. Check the source status, or switch back to Replay.'
+                ? STANDALONE
+                  ? 'Live data comes from the real backend polling adsb.fi and adsb.lol. This standalone build only has the recorded sample: switch back to Replay.'
+                  : 'Live polling is running but no aircraft have arrived yet. Check the source status, or switch back to Replay.'
                 : 'The replay has no aircraft at this moment. It skips gaps on its own; give it a few seconds.'}
             </p>
           </>
@@ -147,30 +149,30 @@ export default function MapView({ overlays = null, bottom = null }) {
   return (
     <div className={`relative flex h-full w-full flex-col ${placing || picking ? 'placing' : ''}`}>
       <div className="relative h-[56vh] min-h-[300px] lg:h-auto lg:min-h-0 lg:flex-1">
-      <MapContainer
-        center={DEFAULT_VIEW.center}
-        zoom={DEFAULT_VIEW.zoom}
-        minZoom={4}
-        maxZoom={10}
-        zoomControl={false}
-        attributionControl={false}
-        worldCopyJump={false}
-        maxBounds={[
-          [-5, 45],
-          [45, 110],
-        ]}
-        className="h-full w-full"
-      >
-        <ZoomControl position="topright" />
-        <BaseLayers />
-        <CellsLayer onCellClick={onCellClick} />
-        {overlays}
-        <AircraftLayer onAircraftClick={onAircraftClick} />
-        <MapBehaviour />
-      </MapContainer>
-      <MapControls />
-      <StaleBanner />
-      <FeedOverlay />
+        <MapContainer
+          center={DEFAULT_VIEW.center}
+          zoom={DEFAULT_VIEW.zoom}
+          minZoom={4}
+          maxZoom={10}
+          zoomControl={false}
+          attributionControl={false}
+          worldCopyJump={false}
+          maxBounds={[
+            [-5, 45],
+            [45, 110],
+          ]}
+          className="h-full w-full"
+        >
+          <ZoomControl position="topright" />
+          <BaseLayers />
+          <CellsLayer onCellClick={onCellClick} />
+          {overlays}
+          <AircraftLayer onAircraftClick={onAircraftClick} />
+          <MapBehaviour />
+        </MapContainer>
+        <MapControls />
+        <StaleBanner />
+        <FeedOverlay />
       </div>
       {/* Desktop: floats over the bottom of the map. Phone: sits below it so the map stays visible. */}
       <div className="flex flex-col items-stretch gap-2 p-2 lg:pointer-events-none lg:absolute lg:inset-x-2 lg:bottom-2 lg:z-[900] lg:p-0">

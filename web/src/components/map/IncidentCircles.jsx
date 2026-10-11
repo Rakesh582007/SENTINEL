@@ -33,15 +33,15 @@ export default function IncidentCircles() {
         ))}
       </Pane>
       <Pane name="incident-labels" style={{ zIndex: 625 }}>
-      {circles.map((i) => (
-        <Marker
-          key={`${i.id}-label`}
-          position={[i.est_lat + i.est_radius_km / 111.2, i.est_lon]}
-          icon={labelIcon(`${i.id}, about ${Math.round(i.est_radius_km)} km radius`, i.injected)}
-          interactive={false}
-          keyboard={false}
-        />
-      ))}
+        {circles.map((i) => (
+          <Marker
+            key={`${i.id}-label`}
+            position={[i.est_lat + i.est_radius_km / 111.2, i.est_lon]}
+            icon={labelIcon(`${i.id}, about ${Math.round(i.est_radius_km)} km radius`, i.injected)}
+            interactive={false}
+            keyboard={false}
+          />
+        ))}
       </Pane>
     </>
   )

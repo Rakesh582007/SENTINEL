@@ -54,7 +54,7 @@ export default function SpoofControls() {
       const who = ac?.flight || hex?.toUpperCase() || 'an aircraft'
       toast(
         spoof.offset_km > 5
-          ? `${res.attack_id} is moving ${who}'s reported position. Its hexagon should turn purple within a tick.`
+          ? `${res.attack_id} moves ${who}'s reported position from its next report (usually 10 to 30 s). Its hexagon then turns purple.`
           : `${res.attack_id} changes ${who}'s GPS altitude only. That flags the aircraft, not the hexagon.`,
         'ok',
       )
