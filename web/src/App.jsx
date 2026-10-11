@@ -10,6 +10,7 @@ import JammerEditor from './components/map/JammerEditor.jsx'
 import MapView from './components/map/MapView.jsx'
 import WarningPaths from './components/map/WarningPaths.jsx'
 import AirspacePanel from './components/panels/AirspacePanel.jsx'
+import ReplayControls from './components/panels/ReplayControls.jsx'
 import SimulatorPanel from './components/simulator/SimulatorPanel.jsx'
 import { useStore } from './store.js'
 
@@ -56,6 +57,7 @@ export default function App() {
       <main className="relative flex min-h-0 flex-1 flex-col lg:flex-row" id={`panel-${tab}`} role="tabpanel" aria-labelledby={`tab-${tab}`}>
         <section className="relative h-[58vh] min-h-[320px] lg:h-auto lg:min-h-0 lg:flex-1" aria-label="Map" hidden={!mapTab}>
           <MapView
+            bottom={<ReplayControls />}
             overlays={
               <>
                 <IncidentCircles />

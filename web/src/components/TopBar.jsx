@@ -4,6 +4,7 @@ import { STALE_AFTER_S } from '../config.js'
 import { sentinelOf } from '../lib/states.js'
 import { istTime, istDay } from '../lib/time.js'
 import { useDerived, useStore } from '../store.js'
+import { useDataElapsed } from './panels/useDataClock.js'
 import { useNow } from './ui.jsx'
 
 const TABS = [
@@ -149,6 +150,7 @@ function Connection() {
 }
 
 export default function TopBar() {
+  const elapsed = useDataElapsed()
   const tab = useStore((s) => s.tab)
   const setTab = useStore((s) => s.setTab)
   const tick = useStore((s) => s.tick)
@@ -199,7 +201,7 @@ export default function TopBar() {
         <ModeSwitch />
         <div className="leading-tight" title={tick ? `${istDay(tick.ts)}, data time in IST` : undefined}>
           <div className="font-data text-[15px] text-ink-900 tnum">
-            {istTime(tick?.ts)} <span className="text-[11px] text-ink-600">IST</span>
+            {istTime(tick ? tick.ts + elapsed : null)} <span className="text-[11px] text-ink-600">IST</span>
           </div>
           <div className="text-[11.5px] text-ink-600">{tick ? (tick.mode === 'replay' ? 'replay time' : 'live') : 'waiting for data'}</div>
         </div>
