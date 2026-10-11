@@ -1,8 +1,5 @@
 """REST API (HANDOVER §8 and §7.1). The WebSocket lives in main.py.
 
-Endpoints marked TODO answer with an empty list or HTTP 501 until their
-detector module is implemented, so the frontend can be built against the
-final shapes today.
 """
 from __future__ import annotations
 
@@ -18,7 +15,7 @@ from app.config import get_detection, reset_detection, update_detection
 from app.detect.evaluate import evaluate
 from app.ingest.recording import list_recordings
 from app.ingest.replay import stamp_of
-from app.models import AttackIn, AttackPatch, JammingIn, ModeIn, RegionIn, SeekIn, SentinelIn, SpeedIn
+from app.models import AttackIn, AttackPatch, ModeIn, RegionIn, SeekIn, SentinelIn, SpeedIn
 from app.regions import REGIONS
 from app.report.pdf import incident_pdf
 from app.runtime import Runtime
@@ -51,7 +48,7 @@ def cells(request: Request):
 @router.get("/alerts")
 def alerts(request: Request, active: bool = True):
     rt = rt_of(request)
-    return (rt.last_tick or {}).get("alerts", [])  # TODO(warning.py) fills these
+    return (rt.last_tick or {}).get("alerts", [])
 
 
 # ---------------------------------------------------------------- mode, region, replay
@@ -177,19 +174,10 @@ def preview_attack(lat: float, lon: float, radius_km: float, request: Request):
 
 @router.post("/attacks")
 def create_attack(body: AttackIn, request: Request):
-    rt = rt_of(request)
-    now = rt.clock.now()
-    if isinstance(body, JammingIn):
-        a = rt.injector.add_jamming(body.center, body.radius_km, body.strength, body.position_loss, body.duration_s, now)
-        extra = rt.preview_circle(body.center[0], body.center[1], body.radius_km)
-    else:
-        hex_id = rt.pick_random_aircraft() if body.hex == "random" else body.hex.lower()
-        if not hex_id:
-            raise HTTPException(409, "no airborne aircraft available to spoof right now")
-        a = rt.injector.add_spoof(hex_id, body.offset_km, body.bearing_deg, body.alt_offset_ft, body.duration_s, now)
-        extra = {}
-    rt.persist_ground_truth()
-    return {"attack_id": a.id, "attack": a.to_dict(now), **extra}
+    try:
+        return rt_of(request).create_attack(body.model_dump())
+    except LookupError as e:
+        raise HTTPException(409, str(e)) from e
 
 
 @router.patch("/attacks/{attack_id}")
@@ -228,7 +216,7 @@ def reset_attacks(request: Request):
 # ---------------------------------------------------------------- incidents, report, evaluation (TODO modules)
 @router.get("/incidents")
 def incidents(request: Request):
-    return rt_of(request).incidents.summary()  # TODO(incidents.py)
+    return rt_of(request).incidents.summary()
 
 
 @router.get("/incidents/{incident_id}")
@@ -257,9 +245,24 @@ def evaluation(request: Request):
     rt = rt_of(request)
     coverage = {a.id: a.max_aircraft_inside for a in rt.injector.attacks.values()}
     try:
-        return evaluate(rt.injector.ground_truth, rt.detections, get_detection(), rt.clock.now(), coverage)
+        return evaluate(rt.injector.ground_truth, rt.detections, get_detection(), rt.clock.now(), coverage, rt.flag_log)
     except NotImplementedError as e:
         raise HTTPException(501, {"error": str(e), "ground_truth": rt.injector.ground_truth, "detections": rt.detections}) from e
+
+
+# ---------------------------------------------------------------- scripted scenarios
+@router.get("/scenarios")
+def scenarios(request: Request):
+    rt = rt_of(request)
+    return {"available": rt.list_scenarios(), "running": rt.scenario_status()}
+
+
+@router.post("/scenarios/{scenario_id}/run")
+def run_scenario(scenario_id: str, request: Request):
+    try:
+        return rt_of(request).start_scenario(scenario_id)
+    except KeyError as e:
+        raise HTTPException(404, str(e)) from e
 
 
 # ---------------------------------------------------------------- ground sentinel

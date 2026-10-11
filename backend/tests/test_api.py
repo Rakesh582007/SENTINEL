@@ -67,10 +67,30 @@ def test_preview_warns_when_too_sparse(client):
     assert p["likely_detectable"] is False and p["hint"]
 
 
-def test_todo_endpoints_answer_honestly(client):
-    assert client.get("/api/alerts").json() == []
-    assert client.get("/api/incidents").json() == []
-    assert client.get("/api/evaluation").status_code == 501
+def test_full_chain_jammer_to_incident_pdf_and_evaluation(client):
+    rt = seed(client, 20)
+    client.post("/api/attacks", json={"kind": "jamming", "center": [31.7, 74.9], "radius_km": 150, "strength": 1.0})
+    rt.ingest_records([make(f"{i:06x}", 31.6 + i * 0.01, 74.91, ts=POLL_TS) for i in range(20)], now=POLL_TS)
+    rt.compute_tick()
+    incs = client.get("/api/incidents").json()
+    assert incs and incs[0]["kind"] == "jamming" and incs[0]["injected"] and incs[0]["est_radius_km"] >= 15
+    pdf = client.get(f"/api/incidents/{incs[0]['id']}/report.pdf")
+    assert pdf.status_code == 200 and pdf.content[:4] == b"%PDF"
+    ev = client.get("/api/evaluation").json()
+    assert ev["events"] == 1 and ev["detected"] == 1 and ev["median_time_to_detect_s"] == 0.0
+
+
+def test_scenarios_list_and_run(client):
+    seed(client)
+    listed = client.get("/api/scenarios").json()
+    assert any(s["id"] == "demo1" for s in listed["available"])
+    st = client.post("/api/scenarios/demo1/run").json()
+    assert st["remaining"] == 3
+    rt = client.app.state.rt
+    rt.clock.set(POLL_TS + 130)
+    rt.compute_tick()
+    assert client.get("/api/scenarios").json()["running"]["fired"][0].startswith("jam-")
+    assert client.post("/api/scenarios/nope/run").status_code == 404
 
 
 def test_sentinel_post_and_latest(client):

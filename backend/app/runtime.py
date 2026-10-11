@@ -12,6 +12,7 @@ Routes reach it as request.app.state.rt. Nothing else holds global state
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import random
 import time
@@ -23,6 +24,7 @@ from app.clock import Clock
 from app.config import Settings, get_detection
 from app.db import connect, insert_sentinel, sync_ground_truth
 from app.detect import spoofing, warning
+from app.detect.spoofing import SPOOF_REASONS
 from app.detect.geo import haversine_km
 from app.detect.incidents import IncidentTracker
 from app.detect.jamming import CellStat, bad_reason, classify_cells, to_geojson
@@ -63,13 +65,17 @@ class Runtime:
         self.last_tick: dict | None = None
         self.last_cells: dict[str, CellStat] = {}
         self.detections: list[dict] = []  # cells ENTERING jammed/spoofing; input for evaluate.py
+        self.flag_log: list[dict] = []  # aircraft newly flagged by spoofing.py; input for evaluate.py
         self._prev_states: dict[str, str] = {}
+        self._prev_flagged: set[str] = set()
+        self.scenario: dict | None = None  # {"id", "start_ts", "pending": [(fire_ts, attack_body)], "fired": [...]}
         self.db = None
 
     # ------------------------------------------------------------------ setup
     def open_db(self) -> None:
         try:
             self.db = connect(self.settings.db_path)
+            self.incidents.db = self.db
         except Exception:  # the demo must not die because of a disk problem
             log.exception("SQLite unavailable; continuing without persistence")
             self.db = None
@@ -116,6 +122,8 @@ class Runtime:
         self.window.clear()
         self.incidents.reset()
         self._prev_states.clear()
+        self._prev_flagged.clear()
+        self.scenario = None  # a time jump cancels a running scenario (its times belong to the old clock)
 
     def reset_experiment(self) -> None:
         """Fresh start: empty window, no attacks, no ground truth, no incidents."""
@@ -123,7 +131,10 @@ class Runtime:
         self.injector.clear_all()
         self.incidents.reset()
         self.detections.clear()
+        self.flag_log.clear()
         self._prev_states.clear()
+        self._prev_flagged.clear()
+        self.scenario = None
         self.persist_ground_truth()
 
     async def start(self, mode: str, files: list[str] | None = None, speed: float | None = None, start_ts: float | None = None) -> None:
@@ -181,6 +192,64 @@ class Runtime:
                 "a longer window, or bigger cells (Cell size: res 2)."),
         }
 
+    def create_attack(self, body: dict) -> dict:
+        """One place that turns a POST /api/attacks body (or a scenario event) into an attack."""
+        now = self.clock.now()
+        if body.get("kind") == "jamming":
+            a = self.injector.add_jamming(tuple(body["center"]), body.get("radius_km", 60), body.get("strength", 0.7),
+                                          body.get("position_loss", 0.3), body.get("duration_s"), now)
+            extra = self.preview_circle(a.center[0], a.center[1], a.radius_km)
+        elif body.get("kind") == "spoof":
+            hex_id = body.get("hex", "random")
+            hex_id = self.pick_random_aircraft() if hex_id == "random" else str(hex_id).lower()
+            if not hex_id:
+                raise LookupError("no airborne aircraft available to spoof right now")
+            a = self.injector.add_spoof(hex_id, body.get("offset_km", 25), body.get("bearing_deg", 45),
+                                        body.get("alt_offset_ft", 0), body.get("duration_s", 300), now)
+            extra = {}
+        else:
+            raise ValueError(f"unknown attack kind {body.get('kind')!r}")
+        self.persist_ground_truth()
+        return {"attack_id": a.id, "attack": a.to_dict(now), **extra}
+
+    def list_scenarios(self) -> list[dict]:
+        out = []
+        for p in sorted(Path(self.settings.scenarios_dir).glob("*.json")):
+            try:
+                d = json.loads(p.read_text(encoding="utf-8"))
+                out.append({"id": d.get("id", p.stem), "file": p.name, "description": d.get("description"),
+                            "events": len(d.get("events", []))})
+            except (OSError, ValueError):
+                continue
+        return out
+
+    def start_scenario(self, scenario_id: str) -> dict:
+        for p in Path(self.settings.scenarios_dir).glob("*.json"):
+            d = json.loads(p.read_text(encoding="utf-8"))
+            if d.get("id", p.stem) == scenario_id:
+                now = self.clock.now()
+                pending = sorted(((now + float(e["at_offset_s"]), e["attack"]) for e in d.get("events", [])), key=lambda x: x[0])
+                self.scenario = {"id": scenario_id, "start_ts": now, "pending": pending, "fired": []}
+                return self.scenario_status()
+        raise KeyError(f"no scenario {scenario_id!r}")
+
+    def scenario_status(self) -> dict | None:
+        if not self.scenario:
+            return None
+        s = self.scenario
+        return {"id": s["id"], "start_ts": s["start_ts"], "fired": s["fired"], "remaining": len(s["pending"]),
+                "next_ts": s["pending"][0][0] if s["pending"] else None}
+
+    def _fire_scenario_events(self, now: float) -> None:
+        if not self.scenario:
+            return
+        while self.scenario["pending"] and self.scenario["pending"][0][0] <= now:
+            _, body = self.scenario["pending"].pop(0)
+            try:
+                self.scenario["fired"].append(self.create_attack(body)["attack_id"])
+            except (LookupError, ValueError) as e:
+                self.scenario["fired"].append(f"skipped: {e}")
+
     def persist_ground_truth(self) -> None:
         if self.db is not None:
             try:
@@ -201,11 +270,16 @@ class Runtime:
     def compute_tick(self) -> dict:
         now = self.clock.now()
         cfg = get_detection()
+        self._fire_scenario_events(now)
         self.window.prune(now)
         recs = self.window.since(now - cfg.jam_window_s, now)
 
         cells = classify_cells(recs, cfg)
         flags = spoofing.flag_aircraft(recs, cfg)
+        spoof_flagged = {h for h, why in flags.items() if SPOOF_REASONS.intersection(why)}
+        for h in spoof_flagged - self._prev_flagged:
+            self.flag_log.append({"ts": now, "hex": h, "reasons": flags[h]})
+        self._prev_flagged = spoof_flagged
         for cell, n_flagged in spoofing.spoofed_cells(flags, recs, cfg).items():
             if n_flagged >= cfg.spoof_cell_min_flags:
                 c = cells.get(cell) or CellStat(h3=cell, n_aircraft=n_flagged, n_bad=0, frac_bad=0.0, lower_bound=0.0, state="spoofing")
@@ -220,8 +294,10 @@ class Runtime:
 
         latest = self.latest_aircraft()
         alarm_cells = {cell: c.state for cell, c in cells.items() if c.state in ALARM_STATES}
-        alerts = warning.early_warnings(latest, alarm_cells, cfg, now)
-        self.incidents.update(cells, recs, cfg, now)
+        injected_cells = {cell for cell, c in cells.items() if c.state in ALARM_STATES and c.n_bad and c.n_injected == c.n_bad}
+        alerts = warning.early_warnings(latest, alarm_cells, cfg, now, injected_cells)
+        alerts += self.sentinel.alerts(time.time())
+        self.incidents.update(cells, recs, cfg, now, flags)
 
         for a in self.injector.live_attacks(now):
             a.max_aircraft_inside = max(a.max_aircraft_inside, self.injector.aircraft_inside(a, latest.values()))
@@ -258,6 +334,7 @@ class Runtime:
             "attacks": [a.to_dict(now) for a in self.injector.attacks.values()],
             "sentinel": self.sentinel.latest(time.time()),
             "replay": self.replayer.status() if self.replayer else None,
+            "scenario": self.scenario_status(),
             "stats": {"aircraft": len(aircraft), "cells": state_counts, "window_records": len(self.window)},
             "credits": ATTRIBUTION,
         }

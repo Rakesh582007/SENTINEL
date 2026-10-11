@@ -36,35 +36,30 @@ python scripts/inspect_recording.py
 
 Startup mode comes from `GAW_MODE` (default `replay`: the newest 3 h of `data/recordings`, or the bundled `data/sample` if there are none). Switch at runtime with `POST /api/mode {"mode": "live"}`. Stop `record.py` while the app runs live: the live poller writes recordings itself (`GAW_RECORD_LIVE`).
 
-## Status (end of 11 Oct)
+## Status (11 Oct, backend complete)
 
 | Area | Status |
 |---|---|
-| `scripts/record.py`, `ingest/recording.py`, `ingest/sources.py`, `regions.py` | done; recorder tested live |
+| Recorder, sources, regions, recording format | done; recorder running on the demo laptop |
 | `scripts/inspect_recording.py` | done; coverage, GPS health, detectability, busiest cells |
-| `ingest/normalize.py`, `records.py` | done + tests (every gotcha below) |
-| `state.py` (window), `clock.py`, `runtime.py`, `db.py` | done |
-| `ingest/poller.py` (live), `ingest/replay.py` | done; smoke-tested end to end on real data |
-| `ingest/injector.py` (Attack Simulator) | done + tests |
+| Normalize, records, window, clock, runtime, db | done + tests |
+| Live poller, replay (speed, seek, loop) | done; smoke-tested end to end on real data |
+| Attack injector (simulator) + scenario runner (`/api/scenarios`) | done + tests |
 | `detect/jamming.py` | done + tests |
-| `api/routes.py`, `main.py` (`/ws`) | done; endpoints of TODO modules return `[]` or 501 |
-| `detect/spoofing.py` | **TODO**, contract in its docstring, already called every tick |
-| `detect/warning.py` | **TODO**, same |
-| `detect/incidents.py`, `report/pdf.py` | **TODO**, same |
-| `detect/evaluate.py` | **TODO**, same |
-| `sentinel.py` server-side re-check | **TODO** (rules in its docstring) |
-| scenario runner for `scenarios/*.json` | TODO (optional) |
-| `web/` | not started (see `web/README.md`) |
-| `firmware/` | not started here (see `firmware/README.md`) |
+| `detect/spoofing.py` (jump, altitude offset, cluster, track; recovery jumps separated) | done + tests; zero false alarms on the 19-min real sample |
+| `detect/warning.py` (15-min projection alerts) | done + tests |
+| `detect/incidents.py` (+ SQLite) and `report/pdf.py` | done + tests |
+| `detect/evaluate.py` (detected / missed / undetectable / pending / unexplained) | done + tests |
+| `sentinel.py` server re-check (baseline SNR, fix loss, drift) | done + tests |
+| `web/` | **not started** (see `web/README.md`) |
+| `firmware/` | not here (see `firmware/README.md`) |
 
 ## Next tasks, in order
 
-1. `detect/spoofing.py`: impossible jump + altitude-offset outlier first, then co-location cluster. Tests first.
-2. `detect/warning.py`: 15-min projection alerts.
-3. `detect/incidents.py` + `report/pdf.py`. For the jammer area, prefer `Record.gps_ok_lat/lon` (readsb's last-good position) when present, else the first bad position.
-4. `detect/evaluate.py`: report `undetectable` separately (`Attack.max_aircraft_inside` is already tracked).
-5. Sentinel re-check rules; then the scenario runner if time allows.
-6. Frontend in `web/` against the tick payload below.
+1. Frontend in `web/` against the tick payload below (two people from hour 0).
+2. Tonight: run `scripts/inspect_recording.py` on the night's recording; pick demo jammer spots from "busiest cells"; update `scenarios/demo1.json` centre if needed.
+3. Tune thresholds only with evidence from recordings; every change in `config.py` with a test.
+4. Each teammate reads one detector file end to end so they can explain it to judges.
 
 ## Architecture in one picture
 
@@ -82,9 +77,11 @@ data/recordings ---> Replayer ------+   (simulated attacks)                     
  cells: GeoJSON FeatureCollection; properties {h3, state, n_aircraft, n_bad, frac_bad, lower_bound, n_injected, reasons},
  aircraft: [{hex, flight, lat, lon, pos_lost, alt_baro, alt_geom, on_ground, gs, track, nic, nac_p, source, age_s,
              bad (reason or null), spoof ([reasons]), injected (attack ids or null)}],
- alerts: [...]  (warning.py), incidents_summary: [...] (incidents.py),
+ alerts: [{id, kind: early_warning | sentinel_jamming | sentinel_spoof, hex, flight, h3, cell_state, eta_s, entry, path, injected, severity, message}],
+ incidents_summary: [{id, kind, opened_ts, closed_ts, open, cells, n_aircraft, est_lat, est_lon, est_radius_km, max_frac_bad, injected}],
  attacks: [{id, kind, live, remaining_s, center, radius_km, strength, position_loss, hex, offset_km, alt_offset_ft, label, max_aircraft_inside, ...}],
- sentinel: [{id, status, age_s, avg_snr, sats_used, ...}], replay: {t_start, t_end, ts, progress, speed, paused, ...} | null,
+ sentinel: [{id, status (device), server_status, server_reason, baseline_snr, age_s, avg_snr, sats_used, ...}],
+ replay: {t_start, t_end, ts, progress, speed, paused, ...} | null, scenario: {id, fired, remaining, next_ts} | null,
  stats: {aircraft, cells: {state: count}, window_records}, credits: {source: url}}
 ```
 
@@ -106,6 +103,9 @@ Cell states: `insufficient` (< min aircraft), `clear`, `degraded`, `jammed`, `sp
 - **D12 Evaluation reports `undetectable` separately** from missed.
 - **D13 Recording format**: one gzip member per JSON line (crash-safe), hourly files with a run id (a restart never appends to a damaged file).
 - **D14 Sentinel status adds `SEARCHING`** (no fix / no sky view) so an indoor box doesn't read as jamming.
+- **D15 `recovery_jump` is not spoofing.** Real data (FDX5384): during GPS loss the position froze, then leapt 13 km in 22 s when GPS returned. A jump with a weak NIC/NACp at either end is logged as `recovery_jump` and never paints a cell purple (`spoofing.SPOOF_REASONS`).
+- **D16 Altitude offset is compared as a fraction of altitude** (GPS minus baro grows with height, ~+4%), so a normal low aircraft isn't flagged against high peers.
+- **D17 Attacks act only from their start time and expire only by duration**; evaluation never calls an unmatched alarm "false", because on live data it may be real.
 
 ## Measured facts (Sun 11 Oct 2026, 12:14-12:36 IST)
 

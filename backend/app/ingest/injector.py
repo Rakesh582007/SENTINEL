@@ -65,7 +65,7 @@ class Attack:
     frozen: dict[str, tuple[float, float, float]] = field(default_factory=dict, repr=False)  # hex -> (lat, lon, ts) where GPS was "lost"
 
     def live(self, now: float) -> bool:
-        if not self.active or self.ended_ts is not None:
+        if not self.active or self.ended_ts is not None or now < self.activated_ts:
             return False
         return self.duration_s is None or now < self.activated_ts + self.duration_s
 
@@ -172,7 +172,7 @@ class Injector:
 
     def live_attacks(self, now: float) -> list[Attack]:
         for a in self.attacks.values():  # close events of attacks whose duration ran out
-            if a.ended_ts is None and a.active and not a.live(now):
+            if a.ended_ts is None and a.active and a.duration_s is not None and now >= a.activated_ts + a.duration_s:
                 self._close_event(a.id, now)
                 a.ended_ts = now
         return [a for a in self.attacks.values() if a.live(now)]

@@ -46,7 +46,7 @@ uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
 ```bash
 cd backend
 python scripts/inspect_recording.py          # coverage, GPS health, detectability, busiest cells
-pytest                                        # 50 tests
+pytest                                        # 68 tests
 ```
 
 The "busiest cells" list is where a judge's simulated jammer will visibly turn cells red. Near Amritsar, traffic is often too thin for the crowd method; that is a real limit of free data, and the pitch should say so.
@@ -54,8 +54,8 @@ The "busiest cells" list is where a judge's simulated jammer will visibly turn c
 ## Layout
 
 ```
-backend/app/        FastAPI app: ingest (poller, replay, injector), detect (jamming done; spoofing, warning,
-                    incidents, evaluate TODO), api, runtime, config
+backend/app/        FastAPI app: ingest (poller, replay, injector), detect (jamming, spoofing, warning,
+                    incidents, evaluate), report (PDF), api, runtime, config
 backend/scripts/    record.py (stdlib recorder), inspect_recording.py
 backend/tests/      pytest + fixtures (one real adsb.fi snapshot)
 data/recordings/    your recordings (git-ignored)    data/sample/  19-minute real sample for replay out of the box
