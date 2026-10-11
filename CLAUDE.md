@@ -111,7 +111,7 @@ Cell states: `insufficient` (< min aircraft), `clear`, `degraded`, `jammed`, `sp
 
 - Aircraft per query, adsb.fi / adsb.lol / union: Amritsar 250 NM 42/18/44, J&K 150 NM 2/1/3, Delhi 150 NM 50/12/51, Mumbai 10/23/23, Chennai 22/27/30.
 - 10-min windows at H3 res 3: ~28 occupied cells, ~10 with >= 3 aircraft. The busiest cell was the Delhi approach (~30 aircraft); a 60 km jammer at Amritsar covered 3 cells with at most 2 aircraft each, so it would show **nothing**. Demo jammers go where `inspect_recording.py` says traffic is.
-- Real event caught in the first 12 minutes: FDX5384 (B77L, N857FD) at FL370 near 33.5N 72.9E (Pakistan, ~200 km west of the J&K border) reported NIC 0 / NACp 0, and adsb.fi set `gpsOkBefore`. One aircraft is not proof of jamming; it is exactly the signal the crowd method aggregates.
+- Real event caught in the first 12 minutes: FDX5384 (B77L, N857FD) at FL370 near 33.5N 72.9E (near Islamabad, about 100 km west of the Line of Control) reported NIC 0 / NACp 0, and adsb.fi set `gpsOkBefore`. One aircraft is not proof of jamming; it is exactly the signal the crowd method aggregates.
 - Both APIs return `now` in milliseconds and the ADSBx-v2 shape `{ac, msg, now, total, ctime, ptime}`. airplanes.live returned 403 from a cloud IP.
 
 ## Git workflow
