@@ -48,7 +48,9 @@ export const useStore = create((set, get) => ({
 
   // ---------------------------------------------------------------- attack simulator
   // The jammer being edited: a draft until started, then bound to attackId.
-  jammer: { center: null, radius_km: 60, strength: 0.7, position_loss: 0.3, duration_min: null, attackId: null },
+  // Defaults are stronger than the handover's 60 km / 70%: measured on the bundled sample, that
+  // jammer left the busy Delhi hexagon amber for minutes, while 80 km / 80% turned it red in one tick.
+  jammer: { center: null, radius_km: 80, strength: 0.8, position_loss: 0.3, duration_min: null, attackId: null },
   setJammer: (patch) => set((s) => ({ jammer: { ...s.jammer, ...patch } })),
   resetJammer: () =>
     set((s) => ({ jammer: { ...s.jammer, center: null, attackId: null }, jammerPreview: null })),

@@ -2,11 +2,15 @@ import { useEffect, useState } from 'react'
 import { api } from './api/client.js'
 import { useLiveFeed } from './api/useLiveFeed.js'
 import Splash from './components/Splash.jsx'
+import Toasts from './components/Toasts.jsx'
 import TopBar from './components/TopBar.jsx'
+import AttackCircles from './components/map/AttackCircles.jsx'
 import IncidentCircles from './components/map/IncidentCircles.jsx'
+import JammerEditor from './components/map/JammerEditor.jsx'
 import MapView from './components/map/MapView.jsx'
 import WarningPaths from './components/map/WarningPaths.jsx'
 import AirspacePanel from './components/panels/AirspacePanel.jsx'
+import SimulatorPanel from './components/simulator/SimulatorPanel.jsx'
 import { useStore } from './store.js'
 
 const INTRO_KEY = 'sentinel:intro-seen'
@@ -55,19 +59,22 @@ export default function App() {
             overlays={
               <>
                 <IncidentCircles />
+                <AttackCircles />
                 <WarningPaths />
+                <JammerEditor />
               </>
             }
           />
         </section>
         {mapTab ? (
           <aside className="min-h-0 w-full overflow-y-auto border-sand-300 bg-sand-100 lg:w-[30%] lg:min-w-[350px] lg:max-w-[470px] lg:border-l">
-            {tab === 'airspace' ? <AirspacePanel /> : <div className="p-4 text-ink-600">Attack simulator arrives in step 3.</div>}
+            {tab === 'airspace' ? <AirspacePanel /> : <SimulatorPanel />}
           </aside>
         ) : (
           <div className="grid flex-1 place-items-center text-ink-600">Ground Sentinel arrives in step 5.</div>
         )}
       </main>
+      <Toasts />
       {intro ? <Splash onEnter={enter} /> : null}
     </div>
   )

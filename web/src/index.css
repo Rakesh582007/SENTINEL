@@ -214,6 +214,32 @@ body {
   border-radius: 6px;
   padding: 2px 7px;
 }
+.attack-label {
+  pointer-events: none;
+  position: absolute;
+  left: 0;
+  top: 0;
+  transform: translate(-50%, 0) translateY(5px);
+  white-space: nowrap;
+  font-size: 12px;
+  line-height: 1.3;
+  color: #4a1d05;
+  background: rgba(251, 248, 241, 0.94);
+  border: 1px dashed #d2560f;
+  border-radius: 6px;
+  padding: 2px 7px;
+}
+.attack-label.draft {
+  color: #143e73;
+  border-color: #1e5aa8;
+}
+.jammer-handle {
+  cursor: grab;
+}
+.jammer-handle:active {
+  cursor: grabbing;
+}
+
 .zone-label .inj,
 .attack-label .inj {
   display: inline-block;
