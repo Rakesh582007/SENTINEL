@@ -4,7 +4,7 @@ An incident is "something has been wrong in this area since HH:MM". It groups
 neighbouring alarm cells, collects the affected aircraft, estimates where a
 jammer might be, and is what the PDF report describes.
 
-    tracker = IncidentTracker(db=None)
+    tracker = IncidentTracker(db=None, run_id=None)
     tracker.update(cells, window_records, cfg, now, spoof_flags)   # every tick
     tracker.summary()   -> short dicts for the tick payload
     tracker.get(id)     -> full dict incl. aircraft (for the PDF)
@@ -19,7 +19,7 @@ Rules:
   mean of those points; radius = the cfg.jammer_radius_pct percentile of
   their distances from the centre, at least cfg.jammer_min_radius_km.
   Always "approximate area for investigation", never a pinpoint.
-- Every change is upserted into SQLite so the report survives a restart.
+- Every change is queued for an upsert into SQLite (db.DbWriter, flushed outside the tick).
 """
 from __future__ import annotations
 
@@ -30,6 +30,7 @@ import logging
 import h3
 
 from app.config import DetectionConfig
+from app.db import UPSERT_INCIDENT
 from app.detect.geo import haversine_km
 from app.detect.jamming import CellStat, bad_reason, cell_of
 from app.detect.stats import percentile
@@ -41,8 +42,10 @@ KIND_OF_STATE = {"jammed": "jamming", "spoofing": "spoofing"}
 
 
 class IncidentTracker:
-    def __init__(self, db=None) -> None:
-        self.db = db
+    def __init__(self, db=None, run_id: str | None = None) -> None:
+        self.db = db  # a db.DbWriter, or None (tests): writes are queued, never run in the tick
+        # ids carry the process run id, so a restart never overwrites the last run's rows in SQLite
+        self.id_prefix = f"inc-{run_id}-" if run_id else "inc-"
         self._incidents: dict[str, dict] = {}
         self._seq = itertools.count(1)
 
@@ -85,7 +88,7 @@ class IncidentTracker:
         return None
 
     def _open(self, cell: str, kind: str, now: float) -> dict:
-        inc_id = f"inc-{next(self._seq)}"
+        inc_id = f"{self.id_prefix}{next(self._seq)}"
         inc = {"id": inc_id, "kind": kind, "opened_ts": now, "closed_ts": None, "last_alarm_ts": now,
                "cells": [cell], "aircraft": {}, "max_frac_bad": 0.0, "peak_aircraft": 0,
                "est_lat": None, "est_lon": None, "est_radius_km": None}
@@ -131,40 +134,54 @@ class IncidentTracker:
         inc.update(est_lat=round(lat, 4), est_lon=round(lon, 4), est_radius_km=round(radius, 1))
 
     def _save(self, inc: dict) -> None:
+        """Queue the upsert (db is a db.DbWriter); the tick itself never touches SQLite."""
         if self.db is None:
             return
-        try:
-            with self.db:
-                self.db.execute(
-                    "INSERT OR REPLACE INTO incidents VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                    (inc["id"], inc["kind"], inc["opened_ts"], inc["closed_ts"], json.dumps(inc["cells"]),
-                     json.dumps(list(inc["aircraft"].values())), inc["est_lat"], inc["est_lon"],
-                     inc["est_radius_km"], inc["max_frac_bad"], int(self._injected(inc))),
-                )
-        except Exception:
-            log.exception("could not save incident %s", inc["id"])
+        row = (inc["id"], inc["kind"], inc["opened_ts"], inc["closed_ts"], json.dumps(inc["cells"]),
+               json.dumps(list(inc["aircraft"].values())), inc["est_lat"], inc["est_lon"],
+               inc["est_radius_km"], inc["max_frac_bad"], int(self._injected(inc)))
+        self.db.submit(lambda conn: conn.execute(UPSERT_INCIDENT, row), key=("incident", inc["id"]))
 
     # ------------------------------------------------------------------ views
     @staticmethod
     def _injected(inc: dict) -> bool:
+        """ANY simulated aircraft makes the incident a test (one real low-NACp aircraft in the
+        area must not make a simulated attack look real)."""
+        return any(a["injected"] for a in inc["aircraft"].values())
+
+    @staticmethod
+    def _mixed(inc: dict) -> bool:
+        """Simulated and real (non-injected) affected aircraft in the same incident."""
         ac = inc["aircraft"].values()
-        return bool(ac) and all(a["injected"] for a in ac)
+        return any(a["injected"] for a in ac) and any(not a["injected"] for a in ac)
 
     def _view(self, inc: dict, full: bool) -> dict:
         out = {k: v for k, v in inc.items() if k != "aircraft"}
         out["n_aircraft"] = len(inc["aircraft"])
         out["injected"] = self._injected(inc)
+        out["mixed"] = self._mixed(inc)
         out["open"] = inc["closed_ts"] is None
         if full:
             out["aircraft"] = sorted(inc["aircraft"].values(), key=lambda a: a["first_bad_ts"])
         return out
 
     def summary(self) -> list[dict]:
-        return [self._view(i, False) for i in sorted(self._incidents.values(), key=lambda i: -i["opened_ts"])]
+        """Newest first. Creation order, not opened_ts: after a replay jumps back in time, an
+        incident opened after the jump has an earlier timestamp but is still the newest."""
+        return [self._view(i, False) for i in reversed(list(self._incidents.values()))]
 
     def get(self, incident_id: str) -> dict | None:
         inc = self._incidents.get(incident_id)
         return self._view(inc, True) if inc else None
 
+    def close_all(self, now: float) -> None:
+        """Replay seek or loop: the history belongs to the old time, so end every open incident
+        there, but keep them (the list and the PDFs survive the jump)."""
+        for inc in self._incidents.values():
+            if inc["closed_ts"] is None:
+                inc["closed_ts"] = max(now, inc["opened_ts"])
+                self._save(inc)
+
     def reset(self) -> None:
+        """Mode switch: a fresh experiment."""
         self._incidents.clear()

@@ -1,6 +1,6 @@
 {
   "id": "demo1",
-  "description": "Scripted test for the evaluation slide: a jammer over the busy Delhi approach, then two spoofed aircraft, injected into real recorded traffic. Every effect is tagged INJECTED TEST ATTACK. Each event's `attack` is exactly a POST /api/attacks body, sent `at_offset_s` seconds of replay time after the scenario starts. The scenario runner itself is still TODO.",
+  "description": "Scripted test for the evaluation slide: a jammer over the busy Delhi approach, then two spoofed aircraft, injected into real recorded traffic. Every effect is tagged INJECTED TEST ATTACK. Each event's `attack` is exactly a POST /api/attacks body, sent `at_offset_s` seconds of replay time after the scenario starts. Run it with POST /api/scenarios/demo1/run.",
   "events": [
     {"at_offset_s": 120, "attack": {"kind": "jamming", "center": [28.47, 77.20], "radius_km": 60, "strength": 0.7, "position_loss": 0.3, "duration_s": 900}},
     {"at_offset_s": 600, "attack": {"kind": "spoof", "hex": "random", "offset_km": 25, "bearing_deg": 70, "alt_offset_ft": 0, "duration_s": 300}},

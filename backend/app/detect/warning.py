@@ -3,11 +3,12 @@
 This is what turns a map into a safety tool: "IGO2317 enters a jammed area
 in ~12 min".
 
-    early_warnings(latest, alarm_cells, cfg, now, injected_cells=()) -> list[dict]
+    early_warnings(latest, alarm_cells, cfg, now, injected_cells=(), mixed_cells=()) -> list[dict]
 
     latest:         {hex: newest Record} for aircraft heard recently
     alarm_cells:    {h3 cell: "jammed" | "spoofing"}
-    injected_cells: alarm cells whose badness comes only from simulated attacks
+    injected_cells: alarm cells with ANY simulated (injected) effect
+    mixed_cells:    alarm cells with both simulated and real (non-injected) effects
 
 Each airborne aircraft with a position, speed and track that is NOT already in
 an alarm cell is stepped forward along a great circle every cfg.warn_step_s
@@ -23,17 +24,16 @@ from app.config import DetectionConfig
 from app.detect.geo import KT_TO_KMH, destination_point
 from app.records import Record
 
-MIN_GS_KT = 60.0  # slower than this is taxiing, holding low, or a helicopter; projection is meaningless
-
 
 def early_warnings(latest: dict[str, Record], alarm_cells: dict[str, str], cfg: DetectionConfig, now: float,
-                   injected_cells: set[str] | frozenset = frozenset()) -> list[dict]:
+                   injected_cells: set[str] | frozenset = frozenset(),
+                   mixed_cells: set[str] | frozenset = frozenset()) -> list[dict]:
     if not alarm_cells:
         return []
     res = h3.get_resolution(next(iter(alarm_cells)))
     alerts = []
     for r in latest.values():
-        if r.on_ground or not r.has_position or r.gs is None or r.track is None or r.gs < MIN_GS_KT:
+        if r.on_ground or not r.has_position or r.gs is None or r.track is None or r.gs < cfg.warn_min_gs_kt:  # taxiing, holding low or a helicopter
             continue
         if h3.latlng_to_cell(r.lat, r.lon, res) in alarm_cells:
             continue
@@ -60,6 +60,7 @@ def early_warnings(latest: dict[str, Record], alarm_cells: dict[str, str], cfg: 
                 "entry": [round(lat, 4), round(lon, 4)],
                 "path": path,
                 "injected": cell in injected_cells,
+                "mixed": cell in mixed_cells,
                 "severity": "high" if eta <= 300 else "medium",
                 "message": f"{name} enters {what} in ~{max(1, round(eta / 60))} min. Prepare backup navigation.",
             })

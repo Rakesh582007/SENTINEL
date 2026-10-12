@@ -25,6 +25,8 @@ class LivePoller:
         self.cooldown_until: dict[str, float] = {}
         self.fail_streak: dict[str, int] = {}
         self.sweeps = 0
+        self.last_error: str | None = None  # the newest error while handling an answer (polling carried on)
+        self.last_error_ts: float | None = None
 
     def _backoff(self, source: str, status: int) -> None:
         if status == 200:
@@ -38,6 +40,35 @@ class LivePoller:
             self.cooldown_until[source] = time.monotonic() + min(600, 30 * 2 ** (streak - 3))
         log.warning("%s failed (status %s, streak %s)", source, status, streak)
 
+    async def poll_one(self, client, point, source: str) -> None:
+        """Ask one source about one circle, then normalise, inject and store the answer."""
+        t0 = time.monotonic()
+        try:
+            resp = await client.get(build_url(source, point))
+            status = resp.status_code
+            data = resp.json() if status == 200 else None
+            err = None if status == 200 else f"HTTP {status}"
+        except Exception as e:  # network errors, bad JSON
+            status, data, err = 0, None, f"{type(e).__name__}: {e}"
+        ms = (time.monotonic() - t0) * 1000
+        ok = status == 200 and isinstance(data, dict)
+        if status == 200 and not ok:
+            data, err = None, "unexpected JSON shape"
+        self._backoff(source, 200 if ok else (status if status != 200 else 0))
+        self.rt.on_live_answer(self.rt.clock.now(), source, point, status, ms, err, data)  # the one clock (wall time when live)
+
+    async def poll_guarded(self, client, point, source: str) -> bool:
+        """poll_one, but an error (e.g. in normalising or injecting) is logged and kept in
+        last_error; polling carries on instead of silently ending."""
+        try:
+            await self.poll_one(client, point, source)
+            return True
+        except Exception as e:
+            self.last_error = f"{type(e).__name__}: {e}"
+            self.last_error_ts = self.rt.clock.now()
+            log.exception("handling the %s answer for %s failed; polling continues", source, point.name)
+            return False
+
     async def run(self) -> None:
         s = self.rt.settings
         headers = {"User-Agent": USER_AGENT, "Accept": "application/json"}
@@ -49,20 +80,7 @@ class LivePoller:
                     for source in list(self.rt.sources):
                         if self.cooldown_until.get(source, 0.0) > time.monotonic() or not due(source, self.sweeps):
                             continue
-                        t0 = time.monotonic()
-                        try:
-                            resp = await client.get(build_url(source, point))
-                            status = resp.status_code
-                            data = resp.json() if status == 200 else None
-                            err = None if status == 200 else f"HTTP {status}"
-                        except Exception as e:  # network errors, bad JSON
-                            status, data, err = 0, None, f"{type(e).__name__}: {e}"
-                        ms = (time.monotonic() - t0) * 1000
-                        ok = status == 200 and isinstance(data, dict)
-                        if status == 200 and not ok:
-                            data, err = None, "unexpected JSON shape"
-                        self.rt.on_live_answer(time.time(), source, point, status, ms, err, data)
-                        self._backoff(source, 200 if ok else (status if status != 200 else 0))
+                        await self.poll_guarded(client, point, source)
                         await asyncio.sleep(s.request_spacing_s)
                 interval = s.sweep_interval_s or SWEEP_INTERVAL_S.get(self.rt.region_name, 10.0)
                 await asyncio.sleep(max(0.0, interval - (time.monotonic() - sweep_start)))

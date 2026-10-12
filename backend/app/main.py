@@ -13,11 +13,14 @@ import asyncio
 import logging
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
+from fastapi.encoders import jsonable_encoder
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 
 from app.api.routes import router
-from app.api.ws import WSManager
+from app.api.ws import WSManager, jsonable
 from app.config import settings
 from app.runtime import Runtime
 
@@ -37,20 +40,38 @@ async def tick_loop(rt: Runtime) -> None:
         await asyncio.sleep(rt.settings.tick_s)
 
 
+async def db_flush_loop(rt: Runtime) -> None:
+    """Write the queued SQLite rows from a worker thread, so the tick never waits on the disk."""
+    while True:
+        await asyncio.sleep(rt.settings.db_flush_s)
+        if rt.dbw is not None:
+            try:
+                await asyncio.to_thread(rt.dbw.flush)
+            except Exception:
+                log.exception("SQLite flush failed")
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     rt = Runtime(settings)
     rt.open_db()
     app.state.rt = rt
-    tick_task = None
+    tasks: list[asyncio.Task] = []
     if settings.autostart:
-        await rt.start(settings.mode)
-        tick_task = asyncio.create_task(tick_loop(rt), name="tick-loop")
+        try:
+            await rt.start(settings.mode)
+        except FileNotFoundError as e:
+            log.error("startup failed: %s", e)
+            rt.close_db()
+            raise RuntimeError(f"startup failed: {e}") from None
+        tasks.append(asyncio.create_task(tick_loop(rt), name="tick-loop"))
+        tasks.append(asyncio.create_task(db_flush_loop(rt), name="db-flush"))
         log.info("started in %s mode, region %s, sources %s", rt.mode, rt.region_name, rt.sources)
     yield
-    if tick_task:
-        tick_task.cancel()
+    for task in tasks:
+        task.cancel()
     await rt.stop_ingest()
+    rt.close_db()  # writes whatever is still queued
 
 
 app = FastAPI(title="GPS Attack Watch", version="0.1.0", lifespan=lifespan)
@@ -63,6 +84,12 @@ app.add_middleware(
 app.include_router(router)
 
 
+@app.exception_handler(RequestValidationError)
+async def validation_error(request: Request, exc: RequestValidationError) -> JSONResponse:
+    """FastAPI's default 422 echoes the bad input back; a NaN input would then fail to serialise (500)."""
+    return JSONResponse(status_code=422, content={"detail": jsonable(jsonable_encoder(exc.errors()))})
+
+
 @app.websocket("/ws")
 async def ws_endpoint(ws: WebSocket) -> None:
     await manager.connect(ws)
@@ -71,7 +98,11 @@ async def ws_endpoint(ws: WebSocket) -> None:
         if rt.last_tick:
             await manager.send(ws, rt.last_tick)  # the newcomer sees the map at once
         while True:
-            await ws.receive_text()  # clients do not need to send anything; this keeps the socket open
+            # Clients need not send anything; this keeps the socket open. receive() (not
+            # receive_text) so a binary frame is ignored instead of raising KeyError.
+            message = await ws.receive()
+            if message["type"] == "websocket.disconnect":
+                break
     except WebSocketDisconnect:
         pass
     finally:

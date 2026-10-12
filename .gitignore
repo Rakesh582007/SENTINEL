@@ -12,8 +12,12 @@ data/recordings/*
 data/*.db
 data/*.db-*
 
-# Local settings
+# Local settings and secrets (GEMINI_API_KEY): never commit a real .env; the .env.example files are committed
 .env
+backend/.env
+*.env
+!.env.example
+!backend/.env.example
 
 # Frontend
 web/node_modules/

@@ -94,6 +94,7 @@ class Injector:
         self.attacks: dict[str, Attack] = {}
         self.ground_truth: list[dict] = []
         self._seq = itertools.count(1)
+        self.epoch = 0  # replay time-jump counter (Runtime.epoch); stamped on every ground-truth event
 
     # ---- lifecycle -------------------------------------------------------
     def add_jamming(self, center: tuple[float, float], radius_km: float, strength: float, position_loss: float, duration_s: float | None, now: float) -> Attack:
@@ -112,6 +113,9 @@ class Injector:
 
     def update(self, attack_id: str, changes: dict, now: float) -> Attack:
         a = self.attacks[attack_id]
+        # An explicit null leaves the field as it is (a slider sending NaN arrives as null and
+        # must not crash the injector). Only duration_s takes None: "until switched off".
+        changes = {k: v for k, v in changes.items() if v is not None or k == "duration_s"}
         allowed = JAMMING_FIELDS if a.kind == "jamming" else SPOOF_FIELDS
         unknown = set(changes) - allowed
         if unknown:
@@ -164,6 +168,17 @@ class Injector:
             if was_live:
                 self._close_event(a.id, old_now)
                 self._open_event(a, new_now)
+
+    def shift(self, delta: float) -> None:
+        """Replay skipped `delta` s of dead air (a gap in the recording): move the timers of
+        running attacks forward, so the gap does not use up their duration. Ground-truth events
+        stay as they are (shifting their start could undo detections made before the gap)."""
+        for a in self.attacks.values():
+            if a.ended_ts is not None:
+                continue
+            a.created_ts += delta
+            a.activated_ts += delta
+            a.frozen = {h: (lat, lon, t + delta) for h, (lat, lon, t) in a.frozen.items()}
 
     def clear_all(self) -> None:
         """Forget attacks AND ground truth (mode switch = a fresh experiment)."""
@@ -229,12 +244,22 @@ class Injector:
             return 0
         return count_inside(a.center, a.radius_km, latest)
 
+    def record_coverage(self, a: Attack, n_inside: int) -> None:
+        """Keep the most aircraft seen inside on the attack AND on its open ground-truth event,
+        so evaluation can still tell 'missed' from 'undetectable' after the attack is deleted."""
+        a.max_aircraft_inside = max(a.max_aircraft_inside, n_inside)
+        for g in reversed(self.ground_truth):
+            if g["attack_id"] == a.id and g["end_ts"] is None:
+                g["max_aircraft_inside"] = max(g.get("max_aircraft_inside", 0), n_inside)
+                return
+
     def _open_event(self, a: Attack, now: float) -> None:
         self.ground_truth.append({
             "attack_id": a.id, "kind": a.kind, "start_ts": now, "end_ts": None,
             "center": a.center, "radius_km": a.radius_km, "strength": a.strength,
             "position_loss": a.position_loss, "hex": a.hex, "offset_km": a.offset_km,
             "bearing_deg": a.bearing_deg, "alt_offset_ft": a.alt_offset_ft,
+            "max_aircraft_inside": 0, "epoch": self.epoch,
         })
 
     def _refresh_event(self, a: Attack) -> None:

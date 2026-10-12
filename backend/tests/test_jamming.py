@@ -62,3 +62,22 @@ def test_simulated_jammer_turns_a_busy_cell_red_and_strength_zero_does_not():
     inj2 = Injector()
     inj2.add_jamming((LAT, LON), 60, 0.0, 0.0, None, now=0)
     assert state_of(inj2.apply(real, now=1)).state == "clear"
+
+
+def test_every_detection_threshold_has_bounds():
+    from annotated_types import Ge, Le
+
+    for name, f in DetectionConfig.model_fields.items():
+        if f.annotation in (int, float):
+            kinds = {type(m) for m in f.metadata}
+            assert Ge in kinds and Le in kinds, f"{name} needs ge= and le="
+
+
+def test_injected_and_mixed_labels():
+    inj = Injector()
+    inj.add_jamming((LAT, LON), 60, 1.0, 0.0, None, now=0)
+    only_sim = state_of(inj.apply(fleet(10, 0), now=1))
+    assert only_sim.injected and not only_sim.mixed
+    both = state_of(inj.apply(fleet(10, 0), now=1) + [make("realbd", LAT, LON + 1e-4, nac_p=4)])  # not injected
+    assert both.injected and both.mixed
+    assert not state_of(fleet(10, 4)).injected  # real-only jamming is never labelled as a test

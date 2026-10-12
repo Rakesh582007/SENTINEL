@@ -1,16 +1,23 @@
 """REST API (HANDOVER §8 and §7.1). The WebSocket lives in main.py.
 
+Every route that changes runtime state (or may run compute_tick) is `async def`:
+FastAPI runs those on the event-loop thread, the same thread as the replayer and the
+tick, so they cannot interleave with them. Plain `def` routes run in a threadpool;
+keep them read-only.
 """
 from __future__ import annotations
 
+import asyncio
 import calendar
-import json
+import copy
 import time
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Query, Request
+from fastapi.exceptions import RequestValidationError
 from fastapi.responses import Response
 from pydantic import ValidationError
 
+from app.ai.summary import build_cell_facts, build_incident_facts, cell_cache_key, incident_cache_key
 from app.config import get_detection, reset_detection, update_detection
 from app.detect.evaluate import evaluate
 from app.ingest.recording import list_recordings
@@ -34,21 +41,22 @@ def health(request: Request):
 
 
 @router.get("/aircraft")
-def aircraft(request: Request):
+async def aircraft(request: Request):
     rt = rt_of(request)
     return (rt.last_tick or rt.compute_tick())["aircraft"]
 
 
 @router.get("/cells")
-def cells(request: Request):
+async def cells(request: Request):
     rt = rt_of(request)
     return (rt.last_tick or rt.compute_tick())["cells"]
 
 
 @router.get("/alerts")
-def alerts(request: Request, active: bool = True):
-    rt = rt_of(request)
-    return (rt.last_tick or {}).get("alerts", [])
+async def alerts(request: Request, active: bool = True):
+    """active=true (default): the alerts the latest tick raised. active=false: alerts that have
+    ended (the aircraft passed or the cell cleared), with first_ts / last_ts / ended_ts."""
+    return rt_of(request).alert_history(active)
 
 
 # ---------------------------------------------------------------- mode, region, replay
@@ -73,11 +81,11 @@ def regions(request: Request):
 
 
 @router.post("/region")
-def set_region(body: RegionIn, request: Request):
+async def set_region(body: RegionIn, request: Request):
     rt = rt_of(request)
     try:
         rt.set_region(body.name, body.points)
-    except (KeyError, ValueError) as e:
+    except (KeyError, ValueError, OverflowError) as e:
         raise HTTPException(422, str(e)) from e
     return {"current": rt.region_name, "points": [p.as_dict() for p in rt.points],
             "note": "applies to live polling from the next sweep; replay plays whatever was recorded"}
@@ -112,28 +120,28 @@ def replay_status(request: Request):
 
 
 @router.post("/replay/seek")
-def replay_seek(body: SeekIn, request: Request):
+async def replay_seek(body: SeekIn, request: Request):
     rep = _replayer(request)
     rep.seek(body.ts)
     return rep.status()
 
 
 @router.post("/replay/speed")
-def replay_speed(body: SpeedIn, request: Request):
+async def replay_speed(body: SpeedIn, request: Request):
     rep = _replayer(request)
     rep.set_speed(body.speed)
     return rep.status()
 
 
 @router.post("/replay/pause")
-def replay_pause(request: Request):
+async def replay_pause(request: Request):
     rep = _replayer(request)
     rep.paused = True
     return rep.status()
 
 
 @router.post("/replay/play")
-def replay_play(request: Request):
+async def replay_play(request: Request):
     rep = _replayer(request)
     rep.paused = False
     return rep.status()
@@ -146,15 +154,15 @@ def get_detection_config():
 
 
 @router.patch("/config/detection")
-def patch_detection_config(changes: dict):
+async def patch_detection_config(changes: dict):
     try:
         return update_detection(changes).model_dump()
     except ValidationError as e:
-        raise HTTPException(422, json.loads(e.json(include_url=False))) from e
+        raise RequestValidationError(e.errors(include_url=False)) from e  # 422 via main.validation_error
 
 
 @router.delete("/config/detection")
-def reset_detection_config():
+async def reset_detection_config():
     return reset_detection().model_dump()
 
 
@@ -167,13 +175,15 @@ def list_attacks(request: Request):
 
 
 @router.get("/attacks/preview")
-def preview_attack(lat: float, lon: float, radius_km: float, request: Request):
-    """How many aircraft a jammer here would touch (show it while the judge drags)."""
+def preview_attack(request: Request, lat: float = Query(ge=-90, le=90), lon: float = Query(ge=-180, le=180),
+                   radius_km: float = Query(ge=10, le=150)):
+    """How many aircraft a jammer here would touch (show it while the judge drags).
+    Same ranges as the jammer itself (radius slider 10-150 km)."""
     return rt_of(request).preview_circle(lat, lon, radius_km)
 
 
 @router.post("/attacks")
-def create_attack(body: AttackIn, request: Request):
+async def create_attack(body: AttackIn, request: Request):
     try:
         return rt_of(request).create_attack(body.model_dump())
     except LookupError as e:
@@ -181,20 +191,21 @@ def create_attack(body: AttackIn, request: Request):
 
 
 @router.patch("/attacks/{attack_id}")
-def patch_attack(attack_id: str, body: AttackPatch, request: Request):
+async def patch_attack(attack_id: str, body: AttackPatch, request: Request):
     rt = rt_of(request)
     if attack_id not in rt.injector.attacks:
         raise HTTPException(404, f"no attack {attack_id}")
     try:
-        a = rt.injector.update(attack_id, body.model_dump(exclude_unset=True), rt.clock.now())
+        a = rt.update_attack(attack_id, body.model_dump(exclude_unset=True))
     except ValueError as e:
         raise HTTPException(422, str(e)) from e
-    rt.persist_ground_truth()
+    except LookupError as e:  # hex "random" with no airborne aircraft
+        raise HTTPException(409, str(e)) from e
     return a.to_dict(rt.clock.now())
 
 
 @router.delete("/attacks/{attack_id}")
-def delete_attack(attack_id: str, request: Request):
+async def delete_attack(attack_id: str, request: Request):
     rt = rt_of(request)
     a = rt.injector.remove(attack_id, rt.clock.now())
     if a is None:
@@ -205,7 +216,7 @@ def delete_attack(attack_id: str, request: Request):
 
 
 @router.delete("/attacks")
-def reset_attacks(request: Request):
+async def reset_attacks(request: Request):
     rt = rt_of(request)
     ids = rt.injector.reset(rt.clock.now())
     restored = sum(rt.window.restore_injected(i) for i in ids)
@@ -228,16 +239,40 @@ def incident(incident_id: str, request: Request):
 
 
 @router.get("/incidents/{incident_id}/report.pdf")
-def incident_report(incident_id: str, request: Request):
-    inc = rt_of(request).incidents.get(incident_id)
+async def incident_report(incident_id: str, request: Request):
+    rt = rt_of(request)
+    inc = rt.incidents.get(incident_id)
     if inc is None:
         raise HTTPException(404, f"no incident {incident_id}")
-    try:
-        pdf = incident_pdf(inc)
-    except NotImplementedError as e:
-        raise HTTPException(501, str(e)) from e
+    facts = build_incident_facts(incident_id, rt.incidents, rt.mode, rt.clock.now())
+    try:  # the PDF never waits longer than GAW_AI_TIMEOUT_S for the AI: then it uses the template
+        summary = await asyncio.wait_for(rt.ai.summarize("incident", incident_id, facts, incident_cache_key(facts), rt.clock.now()),
+                                         timeout=rt.settings.ai_timeout_s)
+    except TimeoutError:
+        summary = rt.ai.template_result("incident", incident_id, facts, rt.clock.now())
+    pdf = await asyncio.to_thread(incident_pdf, copy.deepcopy(inc), summary["summary"], summary["label"])
     return Response(pdf, media_type="application/pdf",
                     headers={"Content-Disposition": f'attachment; filename="incident-{incident_id}.pdf"'})
+
+
+# ---------------------------------------------------------------- AI summaries (words only; rules decide)
+@router.get("/cells/{h3_id}/summary")
+async def cell_summary(h3_id: str, request: Request):
+    """Plain-English note on one hexagon, from the latest tick's rule-engine output."""
+    rt = rt_of(request)
+    facts = build_cell_facts(h3_id, rt.tick_state)
+    if facts is None:
+        raise HTTPException(404, f"no hexagon {h3_id} in the current state")
+    return await rt.ai.summarize("cell", h3_id, facts, cell_cache_key(facts), rt.clock.now())
+
+
+@router.get("/incidents/{incident_id}/summary")
+async def incident_summary(incident_id: str, request: Request):
+    rt = rt_of(request)
+    facts = build_incident_facts(incident_id, rt.incidents, rt.mode, rt.clock.now())
+    if facts is None:
+        raise HTTPException(404, f"no incident {incident_id}")
+    return await rt.ai.summarize("incident", incident_id, facts, incident_cache_key(facts), rt.clock.now())
 
 
 @router.get("/evaluation")
@@ -245,7 +280,7 @@ def evaluation(request: Request):
     rt = rt_of(request)
     coverage = {a.id: a.max_aircraft_inside for a in rt.injector.attacks.values()}
     try:
-        return evaluate(rt.injector.ground_truth, rt.detections, get_detection(), rt.clock.now(), coverage, rt.flag_log)
+        return evaluate(rt.injector.ground_truth, rt.detections, get_detection(), rt.clock.now(), coverage, rt.flag_log, rt.epoch)
     except NotImplementedError as e:
         raise HTTPException(501, {"error": str(e), "ground_truth": rt.injector.ground_truth, "detections": rt.detections}) from e
 
@@ -258,16 +293,18 @@ def scenarios(request: Request):
 
 
 @router.post("/scenarios/{scenario_id}/run")
-def run_scenario(scenario_id: str, request: Request):
+async def run_scenario(scenario_id: str, request: Request):
     try:
         return rt_of(request).start_scenario(scenario_id)
     except KeyError as e:
-        raise HTTPException(404, str(e)) from e
+        raise HTTPException(404, e.args[0] if e.args else str(e)) from e
+    except ValueError as e:  # broken file or invalid event: nothing was scheduled
+        raise HTTPException(422, str(e)) from e
 
 
 # ---------------------------------------------------------------- ground sentinel
 @router.post("/sentinel")
-def sentinel_post(body: SentinelIn, request: Request):
+async def sentinel_post(body: SentinelIn, request: Request):
     entry = rt_of(request).add_sentinel(body.model_dump())
     return {"ok": True, "status": entry["status"], "recv_ts": entry["recv_ts"]}
 

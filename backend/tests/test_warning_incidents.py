@@ -6,8 +6,8 @@ from app.detect.incidents import IncidentTracker
 from app.detect.jamming import classify_cells
 from app.detect.warning import early_warnings
 from app.ingest.injector import Injector
-from app.report.pdf import incident_pdf
-from conftest import make
+from app.report.pdf import incident_pdf, latlon_text, summary_text
+from conftest import make, pdf_text
 
 CFG = DetectionConfig()
 JAM = (31.6, 74.9)
@@ -53,6 +53,22 @@ def test_pdf_renders():
     assert pdf[:4] == b"%PDF" and len(pdf) > 2000
 
 
+def test_pdf_summary_is_worded_by_aircraft_count_and_hemispheres_follow_the_signs():
+    """Audit N9."""
+    base = {"id": "inc-x", "kind": "spoofing", "opened_ts": 1000.0, "closed_ts": None, "cells": [CELL],
+            "est_lat": None, "est_lon": None, "est_radius_km": None, "max_frac_bad": 0.0}
+    one = summary_text({**base, "n_aircraft": 1})
+    assert "a single aircraft" in one and "several independent" not in one and "area above" not in one
+    assert "3 aircraft" in summary_text({**base, "n_aircraft": 3}) and "several independent" in summary_text({**base, "n_aircraft": 3})
+    assert "no individual aircraft" in summary_text({**base, "n_aircraft": 0})
+    assert "area above" in summary_text({**base, "kind": "jamming", "n_aircraft": 3, "est_lat": 31.6, "est_lon": 74.9})
+    assert latlon_text(31.6, 74.9) == "31.600 N, 74.900 E"
+    assert latlon_text(-33.87, -70.65) == "33.870 S, 70.650 W"
+    pdf = incident_pdf({**base, "n_aircraft": 1, "aircraft": [{"hex": "abc123", "flight": "X1", "first_bad_ts": 1000.0,
+                                                               "reason": "impossible_jump", "alt_baro": 30000, "injected": None}]})
+    assert "a single aircraft" in pdf_text(pdf)
+
+
 def test_evaluation_counts_detected_undetectable_and_unexplained():
     gt = [
         {"attack_id": "jam-1", "kind": "jamming", "start_ts": 100, "end_ts": 400, "center": JAM, "radius_km": 60, "hex": None},
@@ -68,3 +84,15 @@ def test_evaluation_counts_detected_undetectable_and_unexplained():
     assert (out["detected"], out["undetectable"], out["missed"]) == (2, 1, 0)
     assert out["unexplained_alarms"] == 1 and out["unexplained_real_data"] == 1
     assert out["median_time_to_detect_s"] == 22.5
+
+
+def test_more_cells_of_the_same_jammer_are_explained_but_real_ones_nearby_are_not():
+    gt = [{"attack_id": "jam-1", "kind": "jamming", "start_ts": 100, "end_ts": None, "center": JAM, "radius_km": 150, "hex": None}]
+    neighbour = h3.grid_disk(CELL, 1)[1]
+    detections = [
+        {"ts": 130, "h3": CELL, "state": "jammed", "n_injected": 5, "injected": True},
+        {"ts": 700, "h3": neighbour, "state": "jammed", "n_injected": 3, "injected": True},  # later, same jammer
+        {"ts": 800, "h3": neighbour, "state": "jammed", "n_injected": 0, "injected": False},  # real interference
+    ]
+    out = evaluate(gt, detections, CFG, now=1000, coverage={}, flag_log=[])
+    assert (out["detected"], out["unexplained_alarms"], out["unexplained_real_data"]) == (1, 1, 1)

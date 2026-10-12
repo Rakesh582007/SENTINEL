@@ -20,6 +20,7 @@ import logging
 import time
 from pathlib import Path
 
+from app.config import get_detection
 from app.ingest.normalize import normalize_line
 from app.ingest.recording import iter_recording, list_recordings
 from app.records import Record
@@ -27,7 +28,6 @@ from app.records import Record
 log = logging.getLogger("gaw.replay")
 
 SAMPLE_DIR = Path(__file__).resolve().parents[3] / "data" / "sample"
-GAP_S = 120.0  # a pause in the recording longer than this is skipped, not replayed as an empty map
 
 
 def stamp_of(path: Path) -> str:
@@ -62,7 +62,9 @@ class Replayer:
         self.paused = False
         self.finished = False
         self.loaded = False
-        self.error: str | None = None
+        self.error: str | None = None  # loading failed: nothing to play
+        self.last_error: str | None = None  # the newest error inside playback (playback carried on)
+        self.last_error_ts: float | None = None
         self.frames: list[tuple[float, list[Record]]] = []
         self.times: list[float] = []
         self.idx = 0
@@ -94,10 +96,11 @@ class Replayer:
     def segments(self) -> list[tuple[float, float]]:
         """Continuous stretches of data (a recorder test run, a restart or a frozen window leaves gaps)."""
         segs, start = [], None
+        gap_s = get_detection().replay_gap_s
         for i, t in enumerate(self.times):
             if start is None:
                 start = t
-            elif t - self.times[i - 1] > GAP_S:
+            elif t - self.times[i - 1] > gap_s:
                 segs.append((start, self.times[i - 1]))
                 start = t
         if start is not None:
@@ -114,7 +117,7 @@ class Replayer:
             return ts
         ts = max(self.t_start, min(float(ts), self.t_end))
         old = self.rt.clock.now()
-        self.rt.clear_for_time_jump()
+        self.rt.clear_for_time_jump(old)
         self.rt.injector.rebase(old, ts)
         self.rt.clock.use_replay(ts)
         lo = bisect.bisect_left(self.times, ts - self.rt.settings.window_keep_s)
@@ -131,32 +134,58 @@ class Replayer:
     def _emit_until(self, target: float) -> None:
         while self.idx < len(self.frames) and self.frames[self.idx][0] <= target:
             ts, recs = self.frames[self.idx]
+            self.idx += 1  # before ingesting: a frame that raises is skipped, not retried forever
             self.rt.ingest_records(recs, now=ts)
-            self.idx += 1
+
+    def _advance(self, dt: float) -> None:
+        """Play dt wall-clock seconds (x speed) of the recording."""
+        if self.paused or self.finished or not self.frames:
+            return
+        target = self.rt.clock.now() + dt * self.speed
+        if self.idx < len(self.frames) and self.frames[self.idx][0] - target > get_detection().replay_gap_s:
+            # Skip dead air in the recording; running attacks keep their remaining duration.
+            self.rt.injector.shift(self.frames[self.idx][0] - target)
+            target = self.frames[self.idx][0]
+        try:
+            self._emit_until(target)
+        finally:
+            self.rt.clock.set(min(target, self.t_end))  # replay time moves on even if a frame failed
+        if self.idx >= len(self.frames):
+            if self.loop:
+                self.seek(self.default_start())
+            else:
+                self.finished = True
+
+    def step(self, dt: float) -> bool:
+        """One iteration of the playback loop. An error is logged and kept in last_error;
+        playback carries on with the next iteration instead of silently ending."""
+        try:
+            self._advance(dt)
+            return True
+        except Exception as e:
+            self.last_error = f"{type(e).__name__}: {e}"
+            self.last_error_ts = self.rt.clock.now()
+            log.exception("replay step failed; replay continues")
+            return False
 
     async def run(self) -> None:
-        await asyncio.to_thread(self.load)
+        try:
+            await asyncio.to_thread(self.load)
+            if self.frames:
+                self.seek(self.start_ts if self.start_ts is not None else self.default_start())
+        except Exception as e:
+            self.error = f"replay could not start: {type(e).__name__}: {e}"
+            log.exception("replay could not start")
+            return
         if not self.frames:
             log.warning(self.error)
             return
-        self.seek(self.start_ts if self.start_ts is not None else self.default_start())
         last = time.monotonic()
         while True:
             await asyncio.sleep(0.2)
             t = time.monotonic()
             dt, last = t - last, t
-            if self.paused or self.finished:
-                continue
-            target = self.rt.clock.now() + dt * self.speed
-            if self.idx < len(self.frames) and self.frames[self.idx][0] - target > GAP_S:
-                target = self.frames[self.idx][0]  # skip dead air in the recording
-            self._emit_until(target)
-            self.rt.clock.set(min(target, self.t_end))
-            if self.idx >= len(self.frames):
-                if self.loop:
-                    self.seek(self.default_start())
-                else:
-                    self.finished = True
+            self.step(dt)
 
     def status(self) -> dict:
         now = self.rt.clock.now()
@@ -166,6 +195,8 @@ class Replayer:
             "sample": bool(self.files) and self.files[0].parent == SAMPLE_DIR,
             "loaded": self.loaded,
             "error": self.error,
+            "last_error": self.last_error,
+            "last_error_ts": self.last_error_ts,
             "t_start": self.t_start,
             "t_end": self.t_end,
             "ts": now,
