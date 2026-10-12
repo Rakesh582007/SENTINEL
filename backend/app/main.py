@@ -40,24 +40,38 @@ async def tick_loop(rt: Runtime) -> None:
         await asyncio.sleep(rt.settings.tick_s)
 
 
+async def db_flush_loop(rt: Runtime) -> None:
+    """Write the queued SQLite rows from a worker thread, so the tick never waits on the disk."""
+    while True:
+        await asyncio.sleep(rt.settings.db_flush_s)
+        if rt.dbw is not None:
+            try:
+                await asyncio.to_thread(rt.dbw.flush)
+            except Exception:
+                log.exception("SQLite flush failed")
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     rt = Runtime(settings)
     rt.open_db()
     app.state.rt = rt
-    tick_task = None
+    tasks: list[asyncio.Task] = []
     if settings.autostart:
         try:
             await rt.start(settings.mode)
         except FileNotFoundError as e:
             log.error("startup failed: %s", e)
+            rt.close_db()
             raise RuntimeError(f"startup failed: {e}") from None
-        tick_task = asyncio.create_task(tick_loop(rt), name="tick-loop")
+        tasks.append(asyncio.create_task(tick_loop(rt), name="tick-loop"))
+        tasks.append(asyncio.create_task(db_flush_loop(rt), name="db-flush"))
         log.info("started in %s mode, region %s, sources %s", rt.mode, rt.region_name, rt.sources)
     yield
-    if tick_task:
-        tick_task.cancel()
+    for task in tasks:
+        task.cancel()
     await rt.stop_ingest()
+    rt.close_db()  # writes whatever is still queued
 
 
 app = FastAPI(title="GPS Attack Watch", version="0.1.0", lifespan=lifespan)

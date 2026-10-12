@@ -38,6 +38,7 @@ class Settings(BaseSettings):
     # Paths
     recordings_dir: Path = REPO_ROOT / "data" / "recordings"
     db_path: Path = REPO_ROOT / "data" / "app.db"
+    db_flush_s: float = Field(1.0, gt=0.0, le=60.0)  # queued SQLite writes are flushed this often, outside the tick
     scenarios_dir: Path = REPO_ROOT / "scenarios"
 
     # Pipeline timing

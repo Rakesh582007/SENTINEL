@@ -422,6 +422,42 @@ def test_mode_switch_with_a_bad_file_keeps_the_current_mode_running(tmp_path, cl
     assert [p.name for p in rt.replayer.files] == [good.name]
 
 
+class ConnSpy:
+    """Records every use of the SQLite connection."""
+
+    def __init__(self, conn):
+        self.conn, self.used = conn, []
+
+    def __getattr__(self, name):
+        self.used.append(name)
+        return getattr(self.conn, name)
+
+    def __enter__(self):
+        self.used.append("begin")
+        return self.conn.__enter__()
+
+    def __exit__(self, *exc):
+        return self.conn.__exit__(*exc)
+
+
+def test_sqlite_writes_are_queued_and_flushed_outside_the_tick(client):
+    """Audit N1: the tick (and the routes) used to write to SQLite directly."""
+    rt = seed(client, 20)
+    spy = ConnSpy(rt.dbw.conn)
+    rt.dbw.conn = spy
+    client.post("/api/attacks", json={"kind": "jamming", "center": [31.7, 74.9], "radius_km": 150, "strength": 1.0})
+    client.post("/api/sentinel", json={"id": "sentinel-n1", "fix": True, "avg_snr": 40.0})
+    rt.ingest_records([make(f"{i:06x}", 31.6 + i * 0.01, 74.91, ts=POLL_TS) for i in range(20)], now=POLL_TS)
+    rt.compute_tick()  # opens an incident
+    queued = rt.dbw.pending()
+    rt.compute_tick()  # upserts it again: replaces the queued write, does not add one
+    assert spy.used == [] and queued == rt.dbw.pending() == 3  # ground truth, sentinel packet, incident
+    assert rt.dbw.flush() == 3 and spy.used and rt.dbw.pending() == 0
+    [inc] = client.get("/api/incidents").json()
+    assert rt.db.execute("SELECT kind FROM incidents WHERE id = ?", (inc["id"],)).fetchone() == ("jamming",)
+    assert rt.db.execute("SELECT COUNT(*) FROM sentinel WHERE id = 'sentinel-n1'").fetchone() == (1,)
+
+
 def test_unknown_ids_are_404_not_500(client):
     assert client.patch("/api/attacks/jam-999", json={"strength": 0.5}).status_code == 404
     assert client.delete("/api/attacks/jam-999").status_code == 404

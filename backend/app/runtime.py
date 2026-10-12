@@ -12,6 +12,7 @@ Routes reach it as request.app.state.rt. Nothing else holds global state
 from __future__ import annotations
 
 import asyncio
+import functools
 import json
 import logging
 import random
@@ -22,7 +23,7 @@ import h3
 
 from app.clock import Clock
 from app.config import Settings, get_detection
-from app.db import connect, insert_sentinel, sync_ground_truth
+from app.db import DbWriter, connect, insert_sentinel, sync_ground_truth
 from app.detect import spoofing, warning
 from app.detect.spoofing import SPOOF_REASONS
 from app.detect.geo import haversine_km
@@ -75,15 +76,26 @@ class Runtime:
         self.epoch = 0
         self.scenario: dict | None = None  # {"id", "start_ts", "pending": [(fire_ts, attack_body)], "fired": [...]}
         self.db = None
+        self.dbw: DbWriter | None = None  # every SQLite write is queued here (see db.py)
 
     # ------------------------------------------------------------------ setup
     def open_db(self) -> None:
         try:
             self.db = connect(self.settings.db_path)
-            self.incidents.db = self.db
+            self.dbw = DbWriter(self.db)
+            self.incidents.db = self.dbw
         except Exception:  # the demo must not die because of a disk problem
             log.exception("SQLite unavailable; continuing without persistence")
-            self.db = None
+            self.db = self.dbw = None
+
+    def close_db(self) -> None:
+        """Shutdown: write what is still queued, then close."""
+        if self.dbw is not None:
+            try:
+                self.dbw.close()
+            except Exception:
+                log.exception("could not close SQLite")
+            self.db = self.dbw = None
 
     # -------------------------------------------------------------- ingestion
     def ingest_records(self, records: list[Record], now: float | None = None) -> int:
@@ -284,19 +296,14 @@ class Runtime:
                 self.scenario["fired"].append(f"skipped: {e}")
 
     def persist_ground_truth(self) -> None:
-        if self.db is not None:
-            try:
-                sync_ground_truth(self.db, self.run_id, self.injector.ground_truth)
-            except Exception:
-                log.exception("could not save ground truth")
+        if self.dbw is not None:  # queued; a snapshot, the list keeps changing
+            events = [dict(e) for e in self.injector.ground_truth]
+            self.dbw.submit(functools.partial(sync_ground_truth, session=self.run_id, events=events), key=("ground_truth", self.run_id))
 
     def add_sentinel(self, packet: dict) -> dict:
         entry = self.sentinel.add(packet, time.time())
-        if self.db is not None:
-            try:
-                insert_sentinel(self.db, entry)
-            except Exception:
-                log.exception("could not save sentinel packet")
+        if self.dbw is not None:  # queued
+            self.dbw.submit(functools.partial(insert_sentinel, entry=dict(entry)))
         return entry
 
     # ------------------------------------------------------------------ tick

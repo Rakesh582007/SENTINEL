@@ -19,7 +19,7 @@ Rules:
   mean of those points; radius = the cfg.jammer_radius_pct percentile of
   their distances from the centre, at least cfg.jammer_min_radius_km.
   Always "approximate area for investigation", never a pinpoint.
-- Every change is upserted into SQLite so the report survives a restart.
+- Every change is queued for an upsert into SQLite (db.DbWriter, flushed outside the tick).
 """
 from __future__ import annotations
 
@@ -30,6 +30,7 @@ import logging
 import h3
 
 from app.config import DetectionConfig
+from app.db import UPSERT_INCIDENT
 from app.detect.geo import haversine_km
 from app.detect.jamming import CellStat, bad_reason, cell_of
 from app.detect.stats import percentile
@@ -42,7 +43,7 @@ KIND_OF_STATE = {"jammed": "jamming", "spoofing": "spoofing"}
 
 class IncidentTracker:
     def __init__(self, db=None) -> None:
-        self.db = db
+        self.db = db  # a db.DbWriter, or None (tests): writes are queued, never run in the tick
         self._incidents: dict[str, dict] = {}
         self._seq = itertools.count(1)
 
@@ -131,18 +132,13 @@ class IncidentTracker:
         inc.update(est_lat=round(lat, 4), est_lon=round(lon, 4), est_radius_km=round(radius, 1))
 
     def _save(self, inc: dict) -> None:
+        """Queue the upsert (db is a db.DbWriter); the tick itself never touches SQLite."""
         if self.db is None:
             return
-        try:
-            with self.db:
-                self.db.execute(
-                    "INSERT OR REPLACE INTO incidents VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                    (inc["id"], inc["kind"], inc["opened_ts"], inc["closed_ts"], json.dumps(inc["cells"]),
-                     json.dumps(list(inc["aircraft"].values())), inc["est_lat"], inc["est_lon"],
-                     inc["est_radius_km"], inc["max_frac_bad"], int(self._injected(inc))),
-                )
-        except Exception:
-            log.exception("could not save incident %s", inc["id"])
+        row = (inc["id"], inc["kind"], inc["opened_ts"], inc["closed_ts"], json.dumps(inc["cells"]),
+               json.dumps(list(inc["aircraft"].values())), inc["est_lat"], inc["est_lon"],
+               inc["est_radius_km"], inc["max_frac_bad"], int(self._injected(inc)))
+        self.db.submit(lambda conn: conn.execute(UPSERT_INCIDENT, row), key=("incident", inc["id"]))
 
     # ------------------------------------------------------------------ views
     @staticmethod
