@@ -112,6 +112,9 @@ class Injector:
 
     def update(self, attack_id: str, changes: dict, now: float) -> Attack:
         a = self.attacks[attack_id]
+        # An explicit null leaves the field as it is (a slider sending NaN arrives as null and
+        # must not crash the injector). Only duration_s takes None: "until switched off".
+        changes = {k: v for k, v in changes.items() if v is not None or k == "duration_s"}
         allowed = JAMMING_FIELDS if a.kind == "jamming" else SPOOF_FIELDS
         unknown = set(changes) - allowed
         if unknown:

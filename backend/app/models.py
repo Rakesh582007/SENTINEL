@@ -27,6 +27,7 @@ class SpeedIn(BaseModel):
 
 
 class JammingIn(BaseModel):
+    model_config = ConfigDict(allow_inf_nan=False)
     kind: Literal["jamming"] = "jamming"
     center: tuple[float, float]  # [lat, lon]
     radius_km: float = Field(60, ge=10, le=150)
@@ -36,6 +37,7 @@ class JammingIn(BaseModel):
 
 
 class SpoofIn(BaseModel):
+    model_config = ConfigDict(allow_inf_nan=False)
     kind: Literal["spoof"] = "spoof"
     hex: str = "random"  # or an aircraft hex from the map
     offset_km: float = Field(25, ge=0, le=80)
@@ -48,9 +50,14 @@ AttackIn = Annotated[Union[JammingIn, SpoofIn], Field(discriminator="kind")]
 
 
 class AttackPatch(BaseModel):
-    """Slider moves. Only the fields sent are changed (exclude_unset)."""
+    """Slider moves. Only the fields sent are changed (exclude_unset).
 
-    model_config = ConfigDict(extra="forbid")
+    An explicit null is ignored (Injector.update), except duration_s: null there
+    means "until switched off". NaN/inf are rejected (JSON.stringify sends NaN as null,
+    other clients may send NaN literally).
+    """
+
+    model_config = ConfigDict(extra="forbid", allow_inf_nan=False)
     active: bool | None = None
     duration_s: float | None = Field(None, ge=30, le=1800)
     center: tuple[float, float] | None = None

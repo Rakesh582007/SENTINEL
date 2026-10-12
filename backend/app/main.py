@@ -13,11 +13,14 @@ import asyncio
 import logging
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
+from fastapi.encoders import jsonable_encoder
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 
 from app.api.routes import router
-from app.api.ws import WSManager
+from app.api.ws import WSManager, jsonable
 from app.config import settings
 from app.runtime import Runtime
 
@@ -61,6 +64,12 @@ app.add_middleware(
     allow_headers=["*"],
 )
 app.include_router(router)
+
+
+@app.exception_handler(RequestValidationError)
+async def validation_error(request: Request, exc: RequestValidationError) -> JSONResponse:
+    """FastAPI's default 422 echoes the bad input back; a NaN input would then fail to serialise (500)."""
+    return JSONResponse(status_code=422, content={"detail": jsonable(jsonable_encoder(exc.errors()))})
 
 
 @app.websocket("/ws")

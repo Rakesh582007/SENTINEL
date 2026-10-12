@@ -25,6 +25,25 @@ def seed(client, n=12):
     return rt
 
 
+def replay_of(tmp_path, rt, snapshot, n=30, run="r000009"):
+    """A Replayer over n polls (10 s apart) of one real API answer."""
+    for i in range(n):
+        append_line(tmp_path, make_line(POLL_TS + 10 * i, "adsb.fi", {"name": "amritsar"}, 200, 300, None, snapshot), run)
+    rep = Replayer(rt, sorted(tmp_path.glob("rec_*.jsonl.gz")))
+    rep.load()
+    return rep
+
+
+def advance(rep, seconds):
+    """What one iteration of Replayer.run does, without the sleep."""
+    target = rep.rt.clock.now() + seconds
+    rep._emit_until(target)
+    rep.rt.clock.set(min(target, rep.t_end))
+
+
+JSON = {"content-type": "application/json"}
+
+
 def test_health_and_map(client):
     seed(client)
     assert client.get("/api/health").json()["n_aircraft"] == 12
@@ -134,6 +153,36 @@ def test_short_recording_starts_inside_and_seek_keeps_attacks(tmp_path, client, 
     attack = rt.injector.add_jamming((31.6, 74.9), 100, 1.0, 0.0, None, now=rt.clock.now())
     rep.seek(rep.t_start + 60)
     assert attack.id in rt.injector.attacks and attack.live(rt.clock.now())
+
+
+def test_patch_null_is_ignored_and_replay_keeps_running(tmp_path, client, real_amritsar):
+    rt = client.app.state.rt
+    rep = replay_of(tmp_path, rt, real_amritsar)
+    rep.seek(rep.t_start + 60)
+    aid = client.post("/api/attacks", json={"kind": "jamming", "center": [31.6, 74.9], "radius_km": 100, "strength": 1.0}).json()["attack_id"]
+    r = client.patch(f"/api/attacks/{aid}", json={"radius_km": None, "strength": None, "center": None, "position_loss": None})
+    assert r.status_code == 200
+    a = r.json()
+    assert (a["radius_km"], a["strength"], a["center"], a["position_loss"]) == (100, 1.0, [31.6, 74.9], 0.3)
+    t0 = rt.clock.now()
+    advance(rep, 60)  # used to raise TypeError inside the replay loop
+    assert rt.clock.now() == t0 + 60
+    assert any(rec.injected == aid for rec in rt.window.all())
+    rt.compute_tick()
+
+
+def test_patch_duration_null_still_means_until_switched_off(client):
+    seed(client)
+    aid = client.post("/api/attacks", json={"kind": "jamming", "center": [31.6, 74.9], "duration_s": 600}).json()["attack_id"]
+    assert client.patch(f"/api/attacks/{aid}", json={"duration_s": None}).json()["duration_s"] is None
+
+
+def test_attack_bodies_reject_nan_and_inf(client):
+    seed(client)
+    aid = client.post("/api/attacks", json={"kind": "jamming", "center": [31.6, 74.9]}).json()["attack_id"]
+    assert client.patch(f"/api/attacks/{aid}", content='{"strength": NaN}', headers=JSON).status_code == 422
+    assert client.patch(f"/api/attacks/{aid}", content='{"radius_km": Infinity}', headers=JSON).status_code == 422
+    assert client.post("/api/attacks", content='{"kind": "jamming", "center": [NaN, 74.9]}', headers=JSON).status_code == 422
 
 
 def test_unknown_ids_are_404_not_500(client):

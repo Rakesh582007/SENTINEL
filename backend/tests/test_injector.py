@@ -71,6 +71,16 @@ def test_moving_the_jammer_starts_a_new_ground_truth_event():
     assert inj.attacks == {}
 
 
+def test_update_ignores_null_except_duration():
+    inj = Injector()
+    a = inj.add_jamming(CENTER, 60, 0.7, 0.3, 300, now=0)
+    inj.update(a.id, {"radius_km": None, "strength": None, "center": None, "active": None}, now=10)
+    assert (a.radius_km, a.strength, a.center, a.active) == (60, 0.7, CENTER, True)
+    inj.update(a.id, {"duration_s": None}, now=20)
+    assert a.duration_s is None and a.live(10_000)
+    assert inj.apply([make("in0001", 31.6, 74.9)], now=30)[0].injected == a.id
+
+
 def test_rebase_keeps_attack_alive_across_a_replay_jump():
     inj = Injector()
     a = inj.add_jamming(CENTER, 60, 1.0, 0.0, 600, now=5000)
