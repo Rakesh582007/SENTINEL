@@ -30,7 +30,7 @@ The dev server proxies `/api` and `/ws`. `?nointro` skips the intro, `?intro` fo
 4. **Attack simulator**: jammer (click map or drag; default 80 km / 80 %, preview, debounced updates), spoofing, active attacks (switch off / remove), sensitivity sliders, scripted demo runner.
 5. **Ground sentinel**: **Live / Attack** switch.
    - *Live*: real box via the backend. Status card (server's own check), facts, 5-minute charts (average signal with normal and alarm lines, satellites used), per-satellite bars, event log. Bars are **green >= 35 dB-Hz (Strong), yellow 28-35 (Medium), red < 28 (Weak)**, always with the word.
-   - *Attack*: browser-only simulator, never sent to the backend. 9 named example satellites (GPS G05/G12/G25, Galileo E11/E24, GLONASS R07/R18, BeiDou C21/C34) with a slider each, a "lower every satellite by" slider and presets (Healthy, Jam by 12 dB, Heavy jam). Same rules as `backend/app/sentinel.py` (10 dB under normal, or fix lost > 5 s). A fix needs >= 4 satellites above 20 dB-Hz (our assumption). Tagged INJECTED TEST ATTACK. Spoofing is not simulated here.
+   - *Attack*: browser-only simulator, never sent to the backend. 9 named example satellites (GPS G05/G12/G25, Galileo E11/E24, GLONASS R07/R18, BeiDou C21/C34) with a slider each, a "lower every satellite by" slider and presets (Healthy, Weaker by 10 dB, Jam: 20 dB down). Same rule as `backend/app/sentinel.py` (average signal below 22 dB-Hz = jamming; a lost fix alone is not). A fix needs >= 4 satellites above 20 dB-Hz (our assumption). Tagged INJECTED TEST ATTACK. Spoofing is not simulated here.
 6. **Evaluation** modal (top bar): detected / missed / undetectable / pending / unexplained.
 
 ## 4. Where things are

@@ -413,8 +413,7 @@ function tag(cur, pristine, attackId, changes) {
 
 // ------------------------------------------------------------------ sentinel.py (+ a simulated box)
 const BASELINE_S = 120
-const SNR_DROP_DB = 10
-const FIX_LOSS_S = 5
+const JAM_SNR_DB = 22 // config.sentinel_jam_snr_db
 const MOVE_M = 50
 const ALT_JUMP_M = 100
 const STATUSES = ['OK', 'SEARCHING', 'JAMMING', 'SPOOF', 'OFFLINE']
@@ -429,10 +428,12 @@ class SentinelStore {
   check(st, p, now) {
     const fix = Boolean(p.fix)
     const { avg_snr: snr, lat, lon, alt } = p
+    const jammed = typeof snr === 'number' && snr < JAM_SNR_DB
+    const jamWhy = () => ['JAMMING', `signal ${snr.toFixed(1)} dB-Hz, below ${JAM_SNR_DB}`]
     if (!fix) {
       st.fix_since = null
-      if (st.baseline_snr != null && st.last_fix_ts != null && now - st.last_fix_ts > FIX_LOSS_S) return ['JAMMING', `fix lost for ${Math.round(now - st.last_fix_ts)} s`]
-      return st.baseline_snr == null ? ['SEARCHING', 'no fix yet'] : ['OK', null]
+      if (st.last_fix_ts == null) return ['SEARCHING', 'no fix yet']
+      return jammed ? jamWhy() : ['OK', 'no fix, signal normal']
     }
     st.last_fix_ts = now
     if (st.fix_since == null) st.fix_since = now
@@ -448,9 +449,10 @@ class SentinelStore {
         st.ref = [med(st.calib.map((c) => c[1])), med(st.calib.map((c) => c[2])), med(st.calib.map((c) => c[3]))]
         st.calib = []
       }
+      if (jammed) return jamWhy()
       return ['OK', st.baseline_snr == null ? 'learning baseline' : null]
     }
-    if (snr != null && snr <= st.baseline_snr - SNR_DROP_DB) return ['JAMMING', `signal ${Math.round(st.baseline_snr - snr)} dB below baseline`]
+    if (jammed) return jamWhy()
     if (st.ref && lat != null && lon != null) {
       const moved = haversineKm(lat, lon, st.ref[0], st.ref[1]) * 1000
       if (moved > MOVE_M) return ['SPOOF', `fixed box appears to move ${Math.round(moved)} m`]

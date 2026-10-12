@@ -11,9 +11,12 @@ jamming alarm (agreed in the hardware session).
 
 Server rules (thresholds below):
 - Baseline: once the box has held a fix for BASELINE_S, the median avg_snr and
-  the median position of that period become its reference.
-- JAMMING: avg_snr at least SNR_DROP_DB below baseline, or the fix lost for
-  more than FIX_LOSS_S after a baseline existed.
+  the median position of that period become its reference (shown on the
+  dashboard; the position is used for SPOOF).
+- JAMMING: avg_snr below JAM_SNR_DB (22 dB-Hz), once the box has had a fix at
+  least once. A fixed level, not "N dB below baseline": indoors the baseline
+  itself sits around 28-30 and small dips raised false alarms. A lost fix with
+  a normal signal is not jamming (OK, reason "no fix, signal normal").
 - SPOOF: the fixed box "moves" more than MOVE_M from its reference, or its
   altitude jumps more than ALT_JUMP_M.
 Alerts from this box are labelled as a signal test (antenna covered), never
@@ -30,8 +33,7 @@ from app.detect.geo import haversine_km
 STATUSES = ("OK", "SEARCHING", "JAMMING", "SPOOF", "OFFLINE")
 # Defaults of the server rules; the numbers live in config.Settings (sentinel_*), override via GAW_SENTINEL_*.
 BASELINE_S: float = Settings.model_fields["sentinel_baseline_s"].default
-SNR_DROP_DB: float = Settings.model_fields["sentinel_snr_drop_db"].default
-FIX_LOSS_S: float = Settings.model_fields["sentinel_fix_loss_s"].default
+JAM_SNR_DB: float = Settings.model_fields["sentinel_jam_snr_db"].default
 MOVE_M: float = Settings.model_fields["sentinel_move_m"].default
 ALT_JUMP_M: float = Settings.model_fields["sentinel_alt_jump_m"].default
 
@@ -61,11 +63,11 @@ class _DeviceState:
 
 
 class SentinelStore:
-    def __init__(self, offline_s: float, max_len: int, baseline_s: float = BASELINE_S, snr_drop_db: float = SNR_DROP_DB,
-                 fix_loss_s: float = FIX_LOSS_S, move_m: float = MOVE_M, alt_jump_m: float = ALT_JUMP_M) -> None:
+    def __init__(self, offline_s: float, max_len: int, baseline_s: float = BASELINE_S, jam_snr_db: float = JAM_SNR_DB,
+                 move_m: float = MOVE_M, alt_jump_m: float = ALT_JUMP_M) -> None:
         self.offline_s = offline_s
         self.max_len = max_len
-        self.baseline_s, self.snr_drop_db, self.fix_loss_s = baseline_s, snr_drop_db, fix_loss_s
+        self.baseline_s, self.jam_snr_db = baseline_s, jam_snr_db
         self.move_m, self.alt_jump_m = move_m, alt_jump_m
         self.packets: dict[str, deque] = {}
         self.state: dict[str, _DeviceState] = {}
@@ -73,11 +75,15 @@ class SentinelStore:
     def _check(self, st: _DeviceState, p: dict, now: float) -> tuple[str, str | None]:
         fix = bool(p.get("fix"))
         snr, lat, lon, alt = _num(p.get("avg_snr")), _num(p.get("lat")), _num(p.get("lon")), _num(p.get("alt"))
+        jammed = snr is not None and snr < self.jam_snr_db
         if not fix:
             st.fix_since = None
-            if st.baseline_snr is not None and st.last_fix_ts is not None and now - st.last_fix_ts > self.fix_loss_s:
-                return "JAMMING", f"fix lost for {now - st.last_fix_ts:.0f} s"
-            return ("SEARCHING", "no fix yet") if st.baseline_snr is None else ("OK", None)
+            if st.last_fix_ts is None:  # never had a fix (indoors at start-up): not an alarm
+                return "SEARCHING", "no fix yet"
+            if jammed:
+                return "JAMMING", f"signal {snr:.1f} dB-Hz, below {self.jam_snr_db:.0f}"
+            return "OK", "no fix, signal normal"
+
         st.last_fix_ts = now
         if st.fix_since is None:
             st.fix_since = now
@@ -92,9 +98,11 @@ class SentinelStore:
                     st.ref = (statistics.median(c[1] for c in pos), statistics.median(c[2] for c in pos),
                               statistics.median(alts) if alts else None)
                 st.calib.clear()
+            if jammed:
+                return "JAMMING", f"signal {snr:.1f} dB-Hz, below {self.jam_snr_db:.0f}"
             return "OK", "learning baseline" if st.baseline_snr is None else None
-        if snr is not None and snr <= st.baseline_snr - self.snr_drop_db:
-            return "JAMMING", f"signal {st.baseline_snr - snr:.0f} dB below baseline"
+        if jammed:
+            return "JAMMING", f"signal {snr:.1f} dB-Hz, below {self.jam_snr_db:.0f}"
         if st.ref and lat is not None and lon is not None:
             moved_m = haversine_km(lat, lon, st.ref[0], st.ref[1]) * 1000
             if moved_m > self.move_m:
