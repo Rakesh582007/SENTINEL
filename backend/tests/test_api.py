@@ -1,9 +1,11 @@
 """API smoke tests. GAW_AUTOSTART=false (conftest), so no network and no background tasks."""
+import asyncio
 import time
 
 import pytest
 from fastapi.testclient import TestClient
 
+from app.ingest.poller import LivePoller
 from app.ingest.recording import append_line, make_line
 from app.ingest.replay import Replayer
 from app.main import app
@@ -35,10 +37,8 @@ def replay_of(tmp_path, rt, snapshot, n=30, run="r000009"):
 
 
 def advance(rep, seconds):
-    """What one iteration of Replayer.run does, without the sleep."""
-    target = rep.rt.clock.now() + seconds
-    rep._emit_until(target)
-    rep.rt.clock.set(min(target, rep.t_end))
+    """Play `seconds` of recording like one iteration of Replayer.run, but let errors raise."""
+    rep._advance(seconds / rep.speed)
 
 
 JSON = {"content-type": "application/json"}
@@ -183,6 +183,58 @@ def test_attack_bodies_reject_nan_and_inf(client):
     assert client.patch(f"/api/attacks/{aid}", content='{"strength": NaN}', headers=JSON).status_code == 422
     assert client.patch(f"/api/attacks/{aid}", content='{"radius_km": Infinity}', headers=JSON).status_code == 422
     assert client.post("/api/attacks", content='{"kind": "jamming", "center": [NaN, 74.9]}', headers=JSON).status_code == 422
+
+
+def test_replay_survives_an_error_and_reports_it(tmp_path, client, real_amritsar, monkeypatch):
+    rt = client.app.state.rt
+    rep = replay_of(tmp_path, rt, real_amritsar)
+    rt.replayer = rep  # what Runtime.start does, so /api/replay and /api/health see it
+    rep.seek(rep.t_start + 60)
+    real_apply, calls = rt.injector.apply, []
+
+    def apply_failing_once(records, now):
+        calls.append(now)
+        if len(calls) == 1:
+            raise RuntimeError("boom")
+        return real_apply(records, now)
+
+    monkeypatch.setattr(rt.injector, "apply", apply_failing_once)
+    t0, idx0 = rt.clock.now(), rep.idx
+    assert rep.step(30) is False  # the error is caught...
+    assert rt.clock.now() == t0 + 30  # ...and replay time still moved on
+    assert rep.step(30) is True and rt.clock.now() == t0 + 60 and rep.idx > idx0 + 3
+    status = client.get("/api/replay").json()
+    assert "boom" in status["last_error"] and status["last_error_ts"] == t0 + 30
+    assert "boom" in client.get("/api/health").json()["last_error"]
+
+
+def test_live_poller_survives_an_error_and_reports_it(client, real_amritsar, monkeypatch):
+    rt = client.app.state.rt
+    poller = LivePoller(rt)
+
+    class Answer:
+        status_code = 200
+
+        def json(self):
+            return real_amritsar
+
+    class FakeHttp:
+        async def get(self, url):
+            return Answer()
+
+    real_on_answer, calls = rt.on_live_answer, []
+
+    def on_answer_failing_once(*args):
+        calls.append(args)
+        if len(calls) == 1:
+            raise RuntimeError("bad answer")
+        return real_on_answer(*args)
+
+    monkeypatch.setattr(rt, "on_live_answer", on_answer_failing_once)
+    assert asyncio.run(poller.poll_guarded(FakeHttp(), rt.points[0], "adsb.fi")) is False
+    assert "bad answer" in poller.last_error
+    assert asyncio.run(poller.poll_guarded(FakeHttp(), rt.points[0], "adsb.fi")) is True
+    assert len(rt.window) > 0
 
 
 def test_unknown_ids_are_404_not_500(client):

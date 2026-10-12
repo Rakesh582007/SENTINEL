@@ -343,6 +343,7 @@ class Runtime:
 
     # ------------------------------------------------------------------ health
     def health(self) -> dict:
+        ingest = self.replayer or self.poller
         return {
             "mode": self.mode,
             "region": self.region_name,
@@ -354,6 +355,8 @@ class Runtime:
             "window_records": len(self.window),
             "source_stats": self.source_stats,
             "replay": self.replayer.status() if self.replayer else None,
+            "last_error": getattr(ingest, "last_error", None),  # newest ingest error (ingest carried on)
+            "last_error_ts": getattr(ingest, "last_error_ts", None),
             "attacks_live": len(self.injector.live_attacks(self.clock.now())),
             "tick_s": self.settings.tick_s,
             "run_id": self.run_id,
