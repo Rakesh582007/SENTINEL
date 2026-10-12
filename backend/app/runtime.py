@@ -73,7 +73,6 @@ class Runtime:
         self.clock = Clock()
         self.window = Window(settings.window_keep_s)
         self.injector = Injector()
-        self.incidents = IncidentTracker()
         self.sentinel = SentinelStore(settings.sentinel_offline_s, settings.sentinel_history_max, settings.sentinel_baseline_s,
                                       settings.sentinel_snr_drop_db, settings.sentinel_fix_loss_s, settings.sentinel_move_m,
                                       settings.sentinel_alt_jump_m)
@@ -82,6 +81,7 @@ class Runtime:
         self.points: tuple[QueryPoint, ...] = get_region(settings.region)
         self.sources = list(settings.sources)
         self.run_id = new_run_id()
+        self.incidents = IncidentTracker(run_id=self.run_id)
         self.ingest_task: asyncio.Task | None = None
         self.replayer: Replayer | None = None
         self.poller: LivePoller | None = None

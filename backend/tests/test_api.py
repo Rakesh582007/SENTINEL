@@ -566,6 +566,17 @@ def test_live_answers_are_stamped_with_the_runtime_clock(client, real_amritsar):
     assert {r.poll_ts for r in rt.window.all()} == {POLL_TS + 123}
 
 
+def test_incident_ids_carry_the_run_id(client):
+    """Audit N11: ids restarted at inc-1 each run and overwrote the last run's rows in SQLite."""
+    rt = seed(client, 20)
+    client.post("/api/attacks", json={"kind": "jamming", "center": [31.7, 74.9], "radius_km": 150, "strength": 1.0})
+    rt.ingest_records([make(f"{i:06x}", 31.6 + i * 0.01, 74.91, ts=POLL_TS) for i in range(20)], now=POLL_TS)
+    rt.compute_tick()
+    [inc] = client.get("/api/incidents").json()
+    assert inc["id"] == f"inc-{rt.run_id}-1"
+    assert client.get(f"/api/incidents/{inc['id']}/report.pdf").status_code == 200
+
+
 def test_unknown_ids_are_404_not_500(client):
     assert client.patch("/api/attacks/jam-999", json={"strength": 0.5}).status_code == 404
     assert client.delete("/api/attacks/jam-999").status_code == 404

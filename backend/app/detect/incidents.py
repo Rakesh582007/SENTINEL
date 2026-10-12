@@ -4,7 +4,7 @@ An incident is "something has been wrong in this area since HH:MM". It groups
 neighbouring alarm cells, collects the affected aircraft, estimates where a
 jammer might be, and is what the PDF report describes.
 
-    tracker = IncidentTracker(db=None)
+    tracker = IncidentTracker(db=None, run_id=None)
     tracker.update(cells, window_records, cfg, now, spoof_flags)   # every tick
     tracker.summary()   -> short dicts for the tick payload
     tracker.get(id)     -> full dict incl. aircraft (for the PDF)
@@ -42,8 +42,10 @@ KIND_OF_STATE = {"jammed": "jamming", "spoofing": "spoofing"}
 
 
 class IncidentTracker:
-    def __init__(self, db=None) -> None:
+    def __init__(self, db=None, run_id: str | None = None) -> None:
         self.db = db  # a db.DbWriter, or None (tests): writes are queued, never run in the tick
+        # ids carry the process run id, so a restart never overwrites the last run's rows in SQLite
+        self.id_prefix = f"inc-{run_id}-" if run_id else "inc-"
         self._incidents: dict[str, dict] = {}
         self._seq = itertools.count(1)
 
@@ -86,7 +88,7 @@ class IncidentTracker:
         return None
 
     def _open(self, cell: str, kind: str, now: float) -> dict:
-        inc_id = f"inc-{next(self._seq)}"
+        inc_id = f"{self.id_prefix}{next(self._seq)}"
         inc = {"id": inc_id, "kind": kind, "opened_ts": now, "closed_ts": None, "last_alarm_ts": now,
                "cells": [cell], "aircraft": {}, "max_frac_bad": 0.0, "peak_aircraft": 0,
                "est_lat": None, "est_lon": None, "est_radius_km": None}
