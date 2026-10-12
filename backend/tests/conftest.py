@@ -21,12 +21,12 @@ POLL_TS = 1791701082.0  # 11 Oct 2026 06:44:42 UTC
 
 @pytest.fixture
 def gotchas() -> dict:
-    return json.loads((FIXTURES / "adsb_gotchas.json").read_text())
+    return json.loads((FIXTURES / "adsb_gotchas.json").read_text(encoding="utf-8"))
 
 
 @pytest.fixture
 def real_amritsar() -> dict:
-    return json.loads((FIXTURES / "adsbfi_amritsar_20261011.json").read_text())
+    return json.loads((FIXTURES / "adsbfi_amritsar_20261011.json").read_text(encoding="utf-8"))
 
 
 def pdf_text(pdf: bytes) -> str:
