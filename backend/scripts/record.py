@@ -65,11 +65,27 @@ def disable_quickedit() -> str:
         return "  (do NOT click inside this window: Windows pauses programs while text is selected)"
 
 
+def write_line(out: Path, line: dict, run_id: str) -> Path | None:
+    """Append one line. A write error (disk full, a file briefly locked by antivirus or a
+    backup tool on Windows) is reported and the line skipped; the recorder keeps running."""
+    try:
+        return append_line(out, line, run_id)
+    except OSError as e:
+        print(f"  ! could not write to {out}: {e} (line skipped, recording continues)", file=sys.stderr)
+        return None
+
+
 def summarize(responses: list[dict | None]) -> dict:
-    """Merge one point's answers from all sources by hex; count what matters."""
+    """Merge one point's answers from all sources by hex; count what matters.
+    Anything that is not the expected JSON object shape is skipped (console summary only)."""
     seen: dict[str, dict] = {}
     for resp in responses:
-        for ac in (resp or {}).get("ac") or []:
+        aircraft = resp.get("ac") if isinstance(resp, dict) else None
+        if not isinstance(aircraft, list):
+            continue
+        for ac in aircraft:
+            if not isinstance(ac, dict):
+                continue
             hex_id = str(ac.get("hex", "")).lower()
             if hex_id:
                 seen.setdefault(hex_id, ac)
@@ -137,9 +153,14 @@ def main() -> int:
                     poll_ts = time.time()
                     req_count[source] += 1
                     line = make_line(poll_ts, source, point.as_dict(), status, ms, err, data)
-                    path = append_line(out, line, run_id)
-                    lines += 1
-                    bytes_written = sum(p.stat().st_size for p in out.glob(f"rec_*_{run_id}.jsonl.gz"))
+                    written = write_line(out, line, run_id)
+                    if written is not None:
+                        path = written
+                        lines += 1
+                        try:
+                            bytes_written = sum(p.stat().st_size for p in out.glob(f"rec_*_{run_id}.jsonl.gz"))
+                        except OSError:
+                            pass  # only the console's MB counter
                     if data is not None and status == 200:
                         ok_count[source] += 1
                         fail_streak[source] = 0
