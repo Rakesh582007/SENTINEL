@@ -8,6 +8,7 @@ os.environ.setdefault("GAW_AUTOSTART", "false")
 os.environ.setdefault("GAW_DB_PATH", str(_TMP / "test.db"))
 os.environ.setdefault("GAW_RECORDINGS_DIR", str(_TMP / "recordings"))
 os.environ.setdefault("GAW_RECORD_LIVE", "false")
+os.environ["GEMINI_API_KEY"] = ""  # beats any backend/.env: tests never call the real Gemini API
 
 import json  # noqa: E402
 

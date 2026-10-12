@@ -2,7 +2,10 @@
 
 Two kinds of settings:
 - `Settings`: fixed at startup, from environment variables prefixed GAW_
-  or a .env file at the repo root (see .env.example).
+  (GEMINI_API_KEY has no prefix) or a .env file: backend/.env (see
+  backend/.env.example) or the repo root .env. Both paths are resolved from
+  this file, so they work whether uvicorn starts in backend/ or the repo root;
+  backend/.env wins. Real environment variables beat both.
 - `DetectionConfig`: detection thresholds the judges can move at runtime via
   PATCH /api/config/detection. Read them with get_detection() on every tick,
   never cache them in a module.
@@ -12,16 +15,18 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field, SecretStr, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from app.regions import DEFAULT_REGION
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
+BACKEND_DIR = REPO_ROOT / "backend"
 
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_prefix="GAW_", env_file=str(REPO_ROOT / ".env"), extra="ignore")
+    model_config = SettingsConfigDict(env_prefix="GAW_", env_file=(REPO_ROOT / ".env", BACKEND_DIR / ".env"),
+                                      env_file_encoding="utf-8", extra="ignore", populate_by_name=True)
 
     # What runs at startup
     mode: Literal["live", "replay"] = "replay"  # the demo defaults to replay; live is a bonus
@@ -65,6 +70,18 @@ class Settings(BaseSettings):
     sentinel_fix_loss_s: float = Field(5.0, gt=0.0)  # JAMMING: fix lost this long after a baseline existed
     sentinel_move_m: float = Field(50.0, gt=0.0)  # SPOOF: the fixed box "moves" this far from its reference
     sentinel_alt_jump_m: float = Field(100.0, gt=0.0)  # SPOOF: its altitude jumps this much
+
+    # AI summary (app/ai/summary.py, decision D22): words only; detection never depends on it
+    gemini_api_key: SecretStr = Field(SecretStr(""), validation_alias=AliasChoices("GEMINI_API_KEY", "GAW_GEMINI_API_KEY"))
+    ai_enabled: bool = True  # GAW_AI_ENABLED; with no key the template summary is used anyway
+    ai_models: str = "gemini-2.5-flash,gemini-2.5-flash-lite,gemini-2.0-flash"  # GAW_AI_MODELS, tried in order
+    ai_timeout_s: float = Field(8.0, ge=2.0, le=30.0)  # per model attempt (and the PDF's whole wait)
+    ai_cache_ttl_s: float = Field(120.0, ge=10.0, le=1800.0)
+    ai_max_per_min: int = Field(12, ge=1, le=600)  # global limit on Gemini calls, protects the free quota
+
+    @property
+    def ai_model_list(self) -> list[str]:
+        return [m.strip() for m in self.ai_models.split(",") if m.strip()]
 
     @property
     def replay_file_list(self) -> list[str]:

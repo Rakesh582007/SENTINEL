@@ -23,6 +23,7 @@ from pathlib import Path
 import h3
 from pydantic import TypeAdapter, ValidationError
 
+from app.ai.summary import Summarizer
 from app.clock import Clock
 from app.config import Settings, get_detection
 from app.db import DbWriter, connect, insert_sentinel, sync_ground_truth
@@ -99,6 +100,8 @@ class Runtime:
         self.epoch = 0
         self.scenario: dict | None = None  # {"id", "start_ts", "pending": [(fire_ts, attack_body)], "fired": [...]}
         self.db = None
+        self.ai = Summarizer(settings)  # words only, on request; never called from the tick
+        self.tick_state: dict | None = None
         self.dbw: DbWriter | None = None  # every SQLite write is queued here (see db.py)
 
     # ------------------------------------------------------------------ setup
@@ -458,6 +461,10 @@ class Runtime:
             "credits": ATTRIBUTION,
         }
         self.last_tick = payload
+        # What the AI summary (app/ai/summary.py) may describe: rule-engine output of this tick only.
+        self.tick_state = {"ts": now, "mode": self.mode, "window_s": cfg.jam_window_s, "cells": cells, "flags": flags,
+                           "spoof_by_cell": flagged, "injected_aircraft": injected_aircraft, "records": recs,
+                           "alerts": alerts, "incidents": payload["incidents_summary"]}
         return payload
 
     # ------------------------------------------------------------------ health
@@ -477,6 +484,7 @@ class Runtime:
             "last_error": getattr(ingest, "last_error", None),  # newest ingest error (ingest carried on)
             "last_error_ts": getattr(ingest, "last_error_ts", None),
             "attacks_live": len(self.injector.live_attacks(self.clock.now())),
+            "ai": self.ai.status(),
             "tick_s": self.settings.tick_s,
             "run_id": self.run_id,
             "regions": sorted(REGIONS),

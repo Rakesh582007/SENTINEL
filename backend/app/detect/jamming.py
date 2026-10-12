@@ -34,6 +34,7 @@ class CellStat:
     bad_hexes: list[str] = field(default_factory=list)
     reasons: dict[str, int] = field(default_factory=dict)  # reason code -> aircraft count
     injected_hexes: list[str] = field(default_factory=list)  # the bad aircraft counted in n_injected
+    bad_reasons: dict[str, str] = field(default_factory=dict)  # hex -> reason code (for summaries; not in the payload)
     # Set by label_injection(): any simulated effect in this cell / both simulated and real ones.
     injected: bool = False
     mixed: bool = False
@@ -140,6 +141,7 @@ def classify_cells(records: Iterable[Record], cfg: DetectionConfig) -> dict[str,
             bad_hexes=sorted(bad_here),
             reasons=dict(reasons),
             injected_hexes=sorted(injected.get(cell, ())),
+            bad_reasons=dict(bad_here),
         )
         label_injection(c)
     return out
