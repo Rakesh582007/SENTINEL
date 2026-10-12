@@ -62,6 +62,19 @@ def ask(ai, facts):
     return asyncio.run(ai.summarize("cell", facts["h3"], facts, cell_cache_key(facts), now_ts=POLL_TS))
 
 
+def test_settings_read_backend_env_wherever_uvicorn_starts(tmp_path, monkeypatch):
+    from app.config import BACKEND_DIR, REPO_ROOT
+
+    files = Settings.model_config["env_file"]
+    assert files == (REPO_ROOT / ".env", BACKEND_DIR / ".env") and all(p.is_absolute() for p in files)  # backend/.env wins
+    monkeypatch.delenv("GEMINI_API_KEY")  # conftest blanks it; here the dotenv file must provide it
+    monkeypatch.chdir(tmp_path)  # a different working directory
+    env = tmp_path / "x.env"
+    env.write_text("GEMINI_API_KEY=from-dotenv\nGAW_AI_MODELS=a, b\n", encoding="utf-8")
+    s = Settings(_env_file=env)
+    assert s.gemini_api_key.get_secret_value() == "from-dotenv" and s.ai_model_list == ["a", "b"]
+
+
 def test_facts_hold_only_rule_engine_output(jam_facts):
     f = jam_facts
     assert (f["state"], f["n_bad"], f["injected"], f["mixed"]) == ("jammed", 20, True, False)

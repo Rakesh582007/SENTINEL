@@ -98,6 +98,16 @@ data/recordings ---> Replayer ------+   (simulated attacks)                     
 
 Cell states: `insufficient` (< min aircraft), `clear`, `degraded`, `jammed`, `spoofing`.
 
+## AI summary (Gemini)
+
+A plain-English note (2-4 sentences) on a hexagon or an incident, for judges and analysts. **Detection stays 100% rule-based**: `app/ai/summary.py` only rewords facts the rule engine already computed (`build_cell_facts` / `build_incident_facts`: state, counts, reasons, injected/mixed, flagged aircraft, early warnings, open incident and its approximate area, mode, time IST). The AI never changes a state, flag or alert, and is never called from the tick, only on request.
+
+- `GET /api/cells/{h3}/summary`, `GET /api/incidents/{id}/summary` -> `{id, summary, source: "ai"|"template", model, label: "AI-written summary"|"Auto summary", generated_ts, cached, facts}`; 404 when the hexagon / incident is not in the current state. The incident PDF shows the same note (with its label) under the title.
+- Order: each model in `GAW_AI_MODELS` with the async google-genai client, `GAW_AI_TIMEOUT_S` each; on an error, timeout, quota (429) or empty answer, the next model. No key, AI off, the global rate limit, or every model failing -> a deterministic template from the same facts (the offline fallback for bad venue Wi-Fi). The PDF waits at most `GAW_AI_TIMEOUT_S` in total.
+- Guard rails in the system instruction: only the given facts, never who is jamming ("approximate area for investigation"), never "we transmit" or "we alert aircraft" (warnings go to controllers/airlines). An injected test always opens with "simulated test attack", even if the model forgets (enforced in code).
+- Cached per (id, state, counts, injected, mixed) for `GAW_AI_CACHE_TTL_S`. `GET /api/health` -> `ai: {enabled, key_present, models, last_model_used, last_error}`. The key is never logged.
+- Settings (`backend/.env`, see `backend/.env.example`; read whether uvicorn starts in `backend/` or the repo root): `GEMINI_API_KEY` (empty = template only), `GAW_AI_ENABLED` (true), `GAW_AI_MODELS` (`gemini-2.5-flash,gemini-2.5-flash-lite,gemini-2.0-flash`), `GAW_AI_TIMEOUT_S` (8, 2-30), `GAW_AI_CACHE_TTL_S` (120, 10-1800), `GAW_AI_MAX_PER_MIN` (12). Never commit `backend/.env`.
+
 ## Decisions log (deviations from the handover)
 
 - **D1 Region = list of query circles** (`regions.py`: `nw_border`, `delhi`, `north_india` (default), `all_india` = 12 circles reaching every major airport). H3 is global, so detection works anywhere with no code change. `POST /api/region` switches live polling.
@@ -118,6 +128,7 @@ Cell states: `insufficient` (< min aircraft), `clear`, `degraded`, `jammed`, `sp
 - **D16 Altitude offset is compared as a fraction of altitude** (GPS minus baro grows with height, ~+4%), so a normal low aircraft isn't flagged against high peers.
 - **D18 Strong vs weak spoofing evidence.** First live run (11 Oct 13:50) raised two inland one-aircraft spoofing alarms. Now `impossible_jump` / `colocation_cluster` can turn a cell purple alone; `alt_offset_outlier` / `track_mismatch` must repeat on the aircraft and need `spoof_cell_min_flags` (2) aircraft per cell. A judge's spoof with `offset_km` > 0 still turns its cell purple; an altitude-only spoof flags the aircraft, not the cell.
 - **D17 Attacks act only from their start time and expire only by duration**; evaluation never calls an unmatched alarm "false", because on live data it may be real.
+- **D22 AI words, rules decide; template fallback offline.** Gemini only rephrases rule-engine facts on request (never in the tick, never changing a state, flag or alert). Without a key, offline, rate-limited or on any model failure, a deterministic Python template from the same facts is used, so the demo never depends on the network.
 
 ## Measured facts (Sun 11 Oct 2026, 12:14-12:36 IST)
 
