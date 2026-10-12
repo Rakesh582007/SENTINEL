@@ -10,7 +10,7 @@ from __future__ import annotations
 import calendar
 import time
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import Response
 from pydantic import ValidationError
@@ -171,8 +171,10 @@ def list_attacks(request: Request):
 
 
 @router.get("/attacks/preview")
-def preview_attack(lat: float, lon: float, radius_km: float, request: Request):
-    """How many aircraft a jammer here would touch (show it while the judge drags)."""
+def preview_attack(request: Request, lat: float = Query(ge=-90, le=90), lon: float = Query(ge=-180, le=180),
+                   radius_km: float = Query(ge=10, le=150)):
+    """How many aircraft a jammer here would touch (show it while the judge drags).
+    Same ranges as the jammer itself (radius slider 10-150 km)."""
     return rt_of(request).preview_circle(lat, lon, radius_km)
 
 
@@ -193,6 +195,8 @@ async def patch_attack(attack_id: str, body: AttackPatch, request: Request):
         a = rt.update_attack(attack_id, body.model_dump(exclude_unset=True))
     except ValueError as e:
         raise HTTPException(422, str(e)) from e
+    except LookupError as e:  # hex "random" with no airborne aircraft
+        raise HTTPException(409, str(e)) from e
     return a.to_dict(rt.clock.now())
 
 

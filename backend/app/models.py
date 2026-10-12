@@ -5,6 +5,10 @@ from typing import Annotated, Literal, Union
 
 from pydantic import BaseModel, ConfigDict, Field
 
+Lat = Annotated[float, Field(ge=-90, le=90)]
+Lon = Annotated[float, Field(ge=-180, le=180)]
+LatLon = tuple[Lat, Lon]
+
 
 class ModeIn(BaseModel):
     mode: Literal["live", "replay"]
@@ -29,7 +33,7 @@ class SpeedIn(BaseModel):
 class JammingIn(BaseModel):
     model_config = ConfigDict(allow_inf_nan=False)
     kind: Literal["jamming"] = "jamming"
-    center: tuple[float, float]  # [lat, lon]
+    center: LatLon  # [lat, lon]
     radius_km: float = Field(60, ge=10, le=150)
     strength: float = Field(0.7, ge=0, le=1)  # share of aircraft inside that lose GPS integrity
     position_loss: float = Field(0.3, ge=0, le=1)  # share of those that also stop reporting a position
@@ -60,11 +64,11 @@ class AttackPatch(BaseModel):
     model_config = ConfigDict(extra="forbid", allow_inf_nan=False)
     active: bool | None = None
     duration_s: float | None = Field(None, ge=30, le=1800)
-    center: tuple[float, float] | None = None
+    center: LatLon | None = None
     radius_km: float | None = Field(None, ge=10, le=150)
     strength: float | None = Field(None, ge=0, le=1)
     position_loss: float | None = Field(None, ge=0, le=1)
-    hex: str | None = None
+    hex: str | None = None  # an aircraft hex, or "random": a random airborne aircraft (409 if none)
     offset_km: float | None = Field(None, ge=0, le=80)
     bearing_deg: float | None = Field(None, ge=0, lt=360)
     alt_offset_ft: float | None = Field(None, ge=-4000, le=4000)

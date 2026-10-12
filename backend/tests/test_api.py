@@ -458,6 +458,27 @@ def test_sqlite_writes_are_queued_and_flushed_outside_the_tick(client):
     assert rt.db.execute("SELECT COUNT(*) FROM sentinel WHERE id = 'sentinel-n1'").fetchone() == (1,)
 
 
+def test_attack_and_preview_ranges(client):
+    """Audit N2."""
+    seed(client)
+    for center in ([200, 500], [31.6, 190], [-91, 0]):
+        assert client.post("/api/attacks", json={"kind": "jamming", "center": center}).status_code == 422, center
+    aid = client.post("/api/attacks", json={"kind": "jamming", "center": [31.6, 74.9]}).json()["attack_id"]
+    assert client.patch(f"/api/attacks/{aid}", json={"center": [95, 0]}).status_code == 422
+    preview = "/api/attacks/preview"
+    for bad in ({"radius_km": 5}, {"radius_km": 200}, {"radius_km": -5}, {"lat": 100}, {"lon": -181}):
+        assert client.get(preview, params={"lat": 31.6, "lon": 74.9, "radius_km": 60, **bad}).status_code == 422, bad
+    assert client.get(preview, params={"lat": 31.6, "lon": 74.9, "radius_km": 60}).status_code == 200
+
+
+def test_patch_spoof_hex_random_picks_a_real_aircraft(client):
+    aid = client.post("/api/attacks", json={"kind": "spoof", "hex": "abc123"}).json()["attack_id"]
+    assert client.patch(f"/api/attacks/{aid}", json={"hex": "random"}).status_code == 409  # nothing airborne yet
+    seed(client)
+    r = client.patch(f"/api/attacks/{aid}", json={"hex": "random"})
+    assert r.status_code == 200 and r.json()["hex"] in {f"{i:06x}" for i in range(12)}  # used to store "random"
+
+
 def test_unknown_ids_are_404_not_500(client):
     assert client.patch("/api/attacks/jam-999", json={"strength": 0.5}).status_code == 404
     assert client.delete("/api/attacks/jam-999").status_code == 404

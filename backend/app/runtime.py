@@ -248,6 +248,10 @@ class Runtime:
 
     def update_attack(self, attack_id: str, changes: dict):
         """A slider move (PATCH): update, refresh the coverage of a new/moved event, persist."""
+        if str(changes.get("hex") or "").lower() == "random":  # same meaning as in POST /api/attacks
+            changes = {**changes, "hex": self.pick_random_aircraft()}
+            if not changes["hex"]:
+                raise LookupError("no airborne aircraft available to spoof right now")
         a = self.injector.update(attack_id, changes, self.clock.now())
         self.refresh_coverage(a)
         self.persist_ground_truth()
