@@ -1,8 +1,9 @@
 import { useEffect, useState } from 'react'
 import { api, errorText } from '../../api/client.js'
 import { STANDALONE } from '../../config.js'
+import { incidentNumber, replayIncident } from '../../lib/incidents.js'
 import { istDay, istHM, istTime } from '../../lib/time.js'
-import { useStore } from '../../store.js'
+import { useDerived, useStore } from '../../store.js'
 import { useDataElapsed } from './useDataClock.js'
 
 const SPEEDS = [1, 2, 5, 10, 20]
@@ -29,6 +30,8 @@ function Replay({ r: tickReplay }) {
   const [busy, setBusy] = useState(false)
   const now = Math.min(r.t_end, (r.ts || r.t_start) + elapsed)
   const span = Math.max(1, r.t_end - r.t_start)
+  const d = useDerived()
+  const marks = d.incidents.filter((i) => i.opened_ts >= r.t_start && i.opened_ts <= r.t_end)
 
   const call = async (fn, ok) => {
     setBusy(true)
@@ -83,10 +86,25 @@ function Replay({ r: tickReplay }) {
       </div>
       <div className="flex min-w-[220px] flex-1 items-center gap-2">
         <span className="font-data text-[12px] text-ink-600 tnum">{istHM(r.t_start)}</span>
+        <div className="relative min-w-0 flex-1">
+        {/* Incident markers: where each incident started in the recording. Click = replay it. */}
+        <div className="pointer-events-none absolute inset-x-[7px] -top-[13px] h-3">
+          {marks.map((i) => (
+            <button
+              key={i.id}
+              type="button"
+              title={`Incident #${incidentNumber(i)} (${i.kind}) started ${istTime(i.opened_ts)} IST. Click to replay.`}
+              aria-label={`Replay incident ${incidentNumber(i)}`}
+              onClick={() => replayIncident(i, d.cellsById)}
+              className="pointer-events-auto absolute h-3 w-3 -translate-x-1/2 rounded-full border-2 border-sand-50"
+              style={{ left: `${((i.opened_ts - r.t_start) / span) * 100}%`, background: i.kind === 'jamming' ? '#E5484D' : '#9B5DE5' }}
+            />
+          ))}
+        </div>
         <input
           type="range"
           aria-label="Replay timeline"
-          className="min-w-0 flex-1"
+          className="w-full"
           min={Math.floor(r.t_start)}
           max={Math.ceil(r.t_end)}
           step={1}
@@ -103,6 +121,7 @@ function Replay({ r: tickReplay }) {
             }
           }}
         />
+        </div>
         <span className="font-data text-[12px] text-ink-600 tnum">{istHM(r.t_end)}</span>
       </div>
       <div className="text-[12.5px] leading-tight text-ink-700">
@@ -184,14 +203,64 @@ function Live() {
   )
 }
 
-/** Bottom bar of the map: replay transport, or live source status. */
+/** Live / Replay switch (Live airspace). The backend runs one mode for the whole app, so
+ *  switching also clears the Attack Simulator's attacks and every incident list. */
+function ModeSwitch({ mode }) {
+  const toast = useStore((s) => s.toast)
+  const setReplayFocus = useStore((s) => s.setReplayFocus)
+  const attacks = useStore((s) => (s.tick?.attacks || []).filter((a) => a.live).length)
+  const [busy, setBusy] = useState(false)
+  const choose = async (next) => {
+    if (next === mode || busy) return
+    if (attacks && !window.confirm(`Switching to ${next} removes the ${attacks} running test ${attacks === 1 ? 'attack' : 'attacks'} and clears the incident lists. Continue?`)) return
+    setBusy(true)
+    try {
+      await api.setMode(next)
+      setReplayFocus(null)
+      toast(next === 'live' ? 'Live: polling adsb.fi and adsb.lol now. Aircraft appear within about 10 s.' : 'Replay: playing the recorded traffic.', 'ok')
+    } catch (e) {
+      toast(`Could not switch: ${errorText(e)}`, 'error')
+    } finally {
+      setBusy(false)
+    }
+  }
+  return (
+    <div className="flex items-center gap-2">
+      <div className="flex overflow-hidden rounded-md border border-sand-400 text-[13px] font-semibold" role="group" aria-label="Data source">
+        {[
+          ['live', 'Live now'],
+          ['replay', 'Replay recording'],
+        ].map(([id, label]) => (
+          <button
+            key={id}
+            type="button"
+            aria-pressed={mode === id}
+            disabled={busy || (STANDALONE && id === 'live')}
+            onClick={() => choose(id)}
+            className={`flex items-center gap-1.5 px-2.5 py-1 disabled:opacity-60 ${mode === id ? 'bg-air-600 text-white' : 'bg-sand-50 text-ink-700 hover:bg-air-50'}`}
+            title={STANDALONE && id === 'live' ? 'Live polling needs the real backend' : undefined}
+          >
+            {id === 'live' ? <span className={`h-2 w-2 rounded-full ${mode === 'live' ? 'bg-[#7CF0A8]' : 'bg-[#2EAF6E]'}`} aria-hidden="true" /> : null}
+            {label}
+          </button>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+/** Bottom bar of the map: Live/Replay switch (Live airspace), then replay transport or live source status. */
 export default function ReplayControls() {
   const tick = useStore((s) => s.tick)
+  const tab = useStore((s) => s.tab)
   if (!tick) return null
   return (
-    <div className="pointer-events-auto rounded-lg border border-sand-400 bg-sand-50/95 px-3 py-2 shadow-float">
+    <div className="pointer-events-auto flex flex-col gap-2 rounded-lg border border-sand-400 bg-sand-50/95 px-3 py-2 shadow-float lg:flex-row lg:items-center lg:gap-4">
+      {tab === 'airspace' ? <ModeSwitch mode={tick.mode} /> : null}
+      <div className="min-w-0 flex-1">
       {tick.mode === 'replay' && tick.replay ? <Replay r={tick.replay} /> : null}
       {tick.mode === 'live' ? (STANDALONE ? <p className="text-[13.5px] text-ink-700">Live polling needs the real backend. Switch back to Replay.</p> : <Live />) : null}
+      </div>
     </div>
   )
 }

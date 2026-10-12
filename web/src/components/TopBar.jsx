@@ -1,7 +1,7 @@
 import { STALE_AFTER_S } from '../config.js'
 import { sentinelOf } from '../lib/states.js'
 import { istTime, istDay } from '../lib/time.js'
-import { useDerived, useStore } from '../store.js'
+import { useStore, viewTick } from '../store.js'
 import { useDataElapsed } from './panels/useDataClock.js'
 import { useNow } from './ui.jsx'
 
@@ -12,9 +12,9 @@ const TABS = [
 ]
 
 function TabHint({ id }) {
-  const tick = useStore((s) => s.tick)
-  const d = useDerived()
-  if (!tick) return null
+  const raw = useStore((s) => s.tick)
+  if (!raw) return null
+  const tick = viewTick(raw, 'real')
   if (id === 'airspace') {
     const n = (tick.stats?.cells?.jammed || 0) + (tick.stats?.cells?.spoofing || 0)
     if (!n) return null
@@ -25,7 +25,7 @@ function TabHint({ id }) {
     )
   }
   if (id === 'simulator') {
-    const n = d.attacks.filter((a) => a.live).length
+    const n = (raw.attacks || []).filter((a) => a.live).length
     if (!n) return null
     return <span className="ml-2 rounded bg-signal-500 px-1.5 text-[12px] font-bold leading-[1.5] text-signal-900">{n} live</span>
   }

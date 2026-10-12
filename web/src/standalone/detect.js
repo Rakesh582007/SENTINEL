@@ -437,7 +437,8 @@ export function earlyWarnings(latest, alarmCells, cfg, now, injectedCells = new 
 const KIND_OF_STATE = { jammed: 'jamming', spoofing: 'spoofing' }
 
 export class IncidentTracker {
-  constructor() {
+  constructor(prefix = 'inc') {
+    this.prefix = prefix
     this.incidents = new Map()
     this.seq = 1
   }
@@ -472,7 +473,7 @@ export class IncidentTracker {
   }
 
   open(cell, kind, now) {
-    const id = `inc-${this.seq++}`
+    const id = `${this.prefix}-${this.seq++}`
     const inc = {
       id,
       kind,

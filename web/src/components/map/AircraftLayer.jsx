@@ -2,7 +2,7 @@ import L from 'leaflet'
 import { memo, useMemo, useState } from 'react'
 import { Marker, Popup, useMap, useMapEvents } from 'react-leaflet'
 import { BAD_REASON, SPOOF_REASON, hasSpoofEvidence } from '../../lib/states.js'
-import { useDerived, useStore } from '../../store.js'
+import { useDerived, useStore, useViewTick } from '../../store.js'
 import { Fact, InjectedBadge } from '../ui.jsx'
 
 const PLANE =
@@ -17,9 +17,9 @@ export function variantOf(a) {
 }
 
 const iconCache = new Map()
-function aircraftIcon(variant, track, injected, selected, tagText) {
+function aircraftIcon(variant, track, injected, selected, tagText, small) {
   const rot = Math.round((track ?? 0) / 5) * 5
-  const key = `${variant}|${rot}|${injected ? 1 : 0}|${selected ? 1 : 0}|${tagText ? 1 : 0}`
+  const key = `${variant}|${rot}|${injected ? 1 : 0}|${selected ? 1 : 0}|${tagText ? 1 : 0}|${small ? 1 : 0}`
   if (iconCache.has(key)) return iconCache.get(key)
   const hollow = variant === 'lost'
   const fill = variant === 'ground' ? '#7D8CA1' : hollow ? '#FBF8F1' : '#2C4467'
@@ -33,7 +33,8 @@ function aircraftIcon(variant, track, injected, selected, tagText) {
           : ''
   const sel = selected ? '<circle cx="12" cy="12" r="11.6" fill="rgba(30,90,168,0.12)" stroke="#1E5AA8" stroke-width="2.4"/>' : ''
   const scale = variant === 'ground' ? 0.72 : 0.86
-  const html = `<div class="ac-icon"><svg viewBox="-1 -1 26 26" aria-hidden="true">${sel}${ring}<g transform="rotate(${rot} 12 12) translate(12 12) scale(${scale}) translate(-12 -12)"><path d="${PLANE}" fill="${fill}" stroke="${
+  const quiet = variant === 'ok' || variant === 'ground'
+  const html = `<div class="ac-icon${small ? ' small' : ''}${quiet && !selected && !injected ? ' quiet' : ''}"><svg viewBox="-1 -1 26 26" aria-hidden="true">${sel}${ring}<g transform="rotate(${rot} 12 12) translate(12 12) scale(${scale}) translate(-12 -12)"><path d="${PLANE}" fill="${fill}" stroke="${
     hollow ? '#2C4467' : '#FBF8F1'
   }" stroke-width="${hollow ? 1.5 : 1.1}" stroke-linejoin="round" paint-order="stroke"/></g></svg>${
     injected && tagText ? '<span class="inj-tag">INJECTED</span>' : ''
@@ -43,7 +44,7 @@ function aircraftIcon(variant, track, injected, selected, tagText) {
   return icon
 }
 
-const AircraftMarker = memo(function AircraftMarker({ a, selected, onPick, tagText }) {
+const AircraftMarker = memo(function AircraftMarker({ a, selected, onPick, tagText, small }) {
   const variant = variantOf(a)
   const handlers = useMemo(
     () => ({
@@ -58,7 +59,7 @@ const AircraftMarker = memo(function AircraftMarker({ a, selected, onPick, tagTe
   return (
     <Marker
       position={[a.lat, a.lon]}
-      icon={aircraftIcon(variant, a.track, Boolean(a.injected), selected, tagText)}
+      icon={aircraftIcon(variant, a.track, Boolean(a.injected), selected, tagText, small)}
       eventHandlers={handlers}
       zIndexOffset={z}
       title={`${a.flight || a.hex.toUpperCase()}`}
@@ -74,7 +75,7 @@ function gpsSentence(a) {
 }
 
 export function AircraftDetails({ a }) {
-  const tick = useStore((s) => s.tick)
+  const tick = useViewTick()
   const spoofCodes = (a.spoof || []).filter(Boolean)
   return (
     <div className="w-[250px]">
@@ -136,7 +137,7 @@ export default function AircraftLayer({ onAircraftClick }) {
   return (
     <>
       {d.aircraft.map((a) =>
-        a.lat != null && a.lon != null ? <AircraftMarker key={a.hex} a={a} selected={a.hex === selectedHex} onPick={onAircraftClick} tagText={tagText || a.hex === selectedHex || String(a.injected || '').includes('spoof')} /> : null,
+        a.lat != null && a.lon != null ? <AircraftMarker key={a.hex} a={a} selected={a.hex === selectedHex} onPick={onAircraftClick} tagText={tagText || a.hex === selectedHex || String(a.injected || '').includes('spoof')} small={zoom <= 6} /> : null,
       )}
       {selected ? (
         <Popup key={selectedHex} position={[selected.lat, selected.lon]} offset={[0, -8]} autoPan={false} eventHandlers={popupHandlers}>

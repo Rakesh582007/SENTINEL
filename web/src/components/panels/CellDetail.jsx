@@ -6,7 +6,7 @@ import { describePlace } from '../../data/places.js'
 import { bearingDeg, fmtLatLon, haversineKm } from '../../lib/geo.js'
 import { BAD_REASON, BAD_SHORT, hasSpoofEvidence, stateOf } from '../../lib/states.js'
 import { clock, istHM } from '../../lib/time.js'
-import { alertInjected, useDerived, useStore } from '../../store.js'
+import { alertInjected, useDerived, useStore, useViewTick, viewOfTab } from '../../store.js'
 import { variantOf } from '../map/AircraftLayer.jsx'
 import { Button, Fact, InjectedBadge, StateChip } from '../ui.jsx'
 import { IncidentCard } from './IncidentsPanel.jsx'
@@ -88,12 +88,13 @@ function AircraftRow({ a }) {
 
 function AiSummary({ h3 }) {
   const [state, setState] = useState({ phase: 'idle' })
-  useEffect(() => setState({ phase: 'idle' }), [h3])
+  const view = useStore((s) => viewOfTab(s.tab))
+  useEffect(() => setState({ phase: 'idle' }), [h3, view])
 
   const draft = async () => {
     setState({ phase: 'loading' })
     try {
-      const res = await api.cellSummary(h3)
+      const res = await api.cellSummary(h3, view)
       setState({ phase: 'done', res })
     } catch (e) {
       if (e instanceof ApiError && (e.status === 404 || e.status === 405 || e.status === 501)) setState({ phase: 'not-built' })
@@ -143,7 +144,7 @@ function AiSummary({ h3 }) {
 
 export default function CellDetail({ id }) {
   const d = useDerived()
-  const tick = useStore((s) => s.tick)
+  const tick = useViewTick()
   const cfg = useStore((s) => s.detection)
   const clearSelection = useStore((s) => s.clearSelection)
   const focusOn = useStore((s) => s.focusOn)

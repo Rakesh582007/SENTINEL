@@ -61,6 +61,15 @@ Receive-only (never imply transmitting). Every simulated thing carries the orang
 - Replay speed buttons respond instantly via an optimistic `replayOverride`, cleared when a tick agrees.
 - Plain-language wording lives next to the code that shows it (`CellDetail.jsx` `PLAIN`, `states.js`).
 
+### Changes on 12 Oct (branch `feat/airspace-cleanup`)
+
+- **Live airspace never shows simulated attacks.** The backend runs the detectors twice per tick; `tick.real` holds cells, aircraft, alerts and incidents from pristine records (incident ids `air-…`). `store.viewTick(tick, view)` / `useViewTick()` / `useDerived()` pick the view by tab: Attack simulator = full tick, everything else = `tick.real`.
+- **Live / Replay switch** is back, inside Live airspace (bottom bar). It calls `POST /api/mode`, which also clears simulator attacks and incident lists (confirm dialog when attacks are running).
+- **Click an incident = replay it**: `lib/incidents.replayIncident` zooms to it and seeks to 90 s before it opened (in live mode it switches to replay at that time). A banner on the map counts down to its start. Incident start times are dots on the replay timeline. The backend now continues the same incident when replay re-detects it (no duplicates on seek or loop).
+- **Map declutter**: incident = small "Jammed #N" chip (+ dashed circle), details in its tooltip; hexagons inside an open incident get no extra label below zoom 8; amber labels only from zoom 8; grey "too few aircraft" hexagons hidden by default; clear hexagons faint; airports are dots with city names only for major ones at zoom 6; planes smaller at country zoom and healthy ones dimmed; plane symbol key collapsed in the legend.
+- **Incident cards**: place name as the title, Started / Lasted / Aircraft hit, Replay + PDF buttons.
+- **PDF** redesigned (backend `report/pdf.py`): header band with status, key-number tiles, one summary, plain-language reasons, Real/Injected column, page footer.
+
 ## 7. Known limits
 
 - The feed ticks every 5 s, so at 20x each aircraft jump covers about 100 s of flight. Fix needs a backend change (tick sooner after a speed change, or a faster tick); do not patch it in the frontend.
