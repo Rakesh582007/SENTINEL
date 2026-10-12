@@ -102,6 +102,12 @@ class DetectionConfig(BaseModel):
     track_mismatch_deg: float = Field(60.0, ge=10.0, le=180.0)
     track_mismatch_min_gs_kt: float = Field(150.0, ge=0.0, le=600.0)
     spoof_cell_min_flags: int = Field(2, ge=1, le=5)  # weak-evidence aircraft needed before a cell turns purple
+    # Feed-glitch guards (decision D20; seen on real data 12 Oct 01:25 IST when adsb.fi froze for 30 s):
+    spoof_frozen_speed_frac: float = Field(0.25, ge=0.05, le=0.9)  # jump start "frozen" if it moved < this x its gs...
+    spoof_frozen_min_gs_kt: float = Field(100.0, ge=0.0, le=600.0)  # ...for aircraft claiming at least this speed
+    spoof_mass_jump_min: int = Field(3, ge=2, le=50)  # this many aircraft jumping in one poll = feed glitch
+    spoof_mass_jump_window_s: float = Field(10.0, ge=1.0, le=120.0)  # "one poll" = landings this close in time
+    spoof_cluster_min_polls: int = Field(2, ge=1, le=10)  # a co-location must persist, pinned in place, this many polls
 
     # §6.3 early warning
     warn_horizon_s: int = Field(900, ge=60, le=3600)

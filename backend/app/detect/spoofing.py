@@ -12,6 +12,11 @@ Reason codes (every number lives in DetectionConfig):
    cfg.jump_speed_kt over more than cfg.jump_min_km. Pairs closer than
    cfg.jump_min_dt_s are skipped: two sources can report the same aircraft
    about a second apart with slightly different positions.
+   Feed-glitch guards (12 Oct 01:25 IST: adsb.fi froze for 30 s, served stale
+   positions, then five aircraft across North India "jumped" 10-14 km at once):
+   no flag if the jump's start position had barely moved since the fix before
+   it although the aircraft reported flying (cfg.spoof_frozen_*), or if at least
+   cfg.spoof_mass_jump_min aircraft jump in the same poll.
 2. "alt_offset_outlier": GPS altitude minus barometric altitude, compared
    with nearby aircraft. The difference is normally positive and grows with
    altitude (about +4% here, set by air temperature), so each aircraft's
@@ -20,7 +25,11 @@ Reason codes (every number lives in DetectionConfig):
    is normal.
 3. "colocation_cluster": several different aircraft reporting nearly the same
    spot at the same moment but thousands of feet apart vertically, which is
-   what a spoofer pulling everyone to one fake position produces.
+   what a spoofer pulling everyone to one fake position produces. The same
+   aircraft must stay stacked on the same spot for cfg.spoof_cluster_min_polls
+   polls: airway traffic in trail at FL330/350/390 passes one point within
+   seconds (seen 12 Oct 00:40 IST) but moves on; a spoofer pins them (seen
+   11 Oct 23:34 IST near Amritsar: FL195/370/390 on one point for over a minute).
 4. "track_mismatch": the reported direction of travel disagrees with the
    direction between its last two positions.
 
@@ -36,7 +45,8 @@ Informational, NOT spoofing evidence: "recovery_jump" = an impossible jump
 where either end had a bad GPS score. Seen on real data (FDX5384, 11 Oct):
 during GPS loss the position froze, then leapt 13 km in 22 s when GPS came
 back. That is the tail of jamming, so it must not paint a cell purple.
-SPOOF_REASONS lists the codes that do.
+"feed_glitch" = an impossible jump explained by the data feed (see 1.); also info only.
+SPOOF_REASONS lists the codes that do paint cells.
 """
 from __future__ import annotations
 
@@ -84,9 +94,25 @@ def _tracks(records: list[Record]) -> dict[str, list[Record]]:
     return by_hex
 
 
+def _frozen(before: Record | None, start: Record, cfg: DetectionConfig) -> bool:
+    """The jump's start position had barely moved since the fix before it, although the
+    aircraft reports flying: the feed froze and served a stale position, so the "jump" is
+    the feed catching up. A spoofer pinning an aircraft to a point is different: its
+    reported ground speed is low too, so this stays False and the jump is still flagged."""
+    if before is None:
+        return False
+    gs = start.gs if start.gs is not None else before.gs
+    dt = start.ts - before.ts
+    if gs is None or gs < cfg.spoof_frozen_min_gs_kt or dt <= 0:
+        return False
+    moved_kt = implied_speed_kt(haversine_km(before.lat, before.lon, start.lat, start.lon), dt)
+    return moved_kt < cfg.spoof_frozen_speed_frac * gs
+
+
 def _jump_and_track(tracks: dict[str, list[Record]], cfg: DetectionConfig, flags: dict[str, set]) -> None:
+    jumps: list[tuple[float, str]] = []  # (poll time of the landing fix, hex) of jumps that look like spoofing
     for hex_id, rs in tracks.items():
-        prev = None
+        before = prev = None
         mismatches = 0
         for r in rs:
             if prev is None:
@@ -97,8 +123,12 @@ def _jump_and_track(tracks: dict[str, list[Record]], cfg: DetectionConfig, flags
                 continue  # too close in time to compare; keep the older anchor
             d = haversine_km(prev.lat, prev.lon, r.lat, r.lon)
             if d > cfg.jump_min_km and implied_speed_kt(d, dt) > cfg.jump_speed_kt:
-                weak = _weak_gps(prev, cfg) or _weak_gps(r, cfg)
-                flags[hex_id].add("recovery_jump" if weak else "impossible_jump")
+                if _weak_gps(prev, cfg) or _weak_gps(r, cfg):
+                    flags[hex_id].add("recovery_jump")
+                elif _frozen(before, prev, cfg):
+                    flags[hex_id].add("feed_glitch")
+                else:
+                    jumps.append((r.poll_ts, hex_id))
             elif (
                 r.track is not None and prev.track is not None and r.gs is not None
                 and r.gs > cfg.track_mismatch_min_gs_kt and dt <= TRACK_CHECK_MAX_DT_S and d >= TRACK_CHECK_MIN_KM
@@ -108,7 +138,11 @@ def _jump_and_track(tracks: dict[str, list[Record]], cfg: DetectionConfig, flags
                 mismatches += 1
                 if mismatches >= 2:
                     flags[hex_id].add("track_mismatch")
-            prev = r
+            before, prev = prev, r
+    # Many different aircraft "jumping" in the same poll is the feed, not a spoofer.
+    for t, hex_id in jumps:
+        same_poll = {h for t2, h in jumps if abs(t2 - t) <= cfg.spoof_mass_jump_window_s}
+        flags[hex_id].add("feed_glitch" if len(same_poll) >= cfg.spoof_mass_jump_min else "impossible_jump")
 
 
 def _mean_heading(a: float, b: float) -> float:
@@ -156,6 +190,7 @@ def _clusters(tracks: dict[str, list[Record]], cfg: DetectionConfig, flags: dict
         return
     recent = [r for rs in tracks.values() for r in rs if r.ts >= newest_ts - CLUSTER_LOOKBACK_S and r.alt_baro is not None]
     recent.sort(key=lambda r: r.ts)
+    sightings: dict[frozenset, list[tuple[float, float, float]]] = defaultdict(list)  # aircraft set -> (ts, lat, lon)
     for i, a in enumerate(recent):
         group = {a.hex: a}
         for b in recent[i + 1:]:
@@ -166,8 +201,24 @@ def _clusters(tracks: dict[str, list[Record]], cfg: DetectionConfig, flags: dict
         if len(group) >= cfg.cluster_min_aircraft:
             alts = [r.alt_baro for r in group.values()]
             if max(alts) - min(alts) > cfg.cluster_alt_spread_ft:
-                for hex_id in group:
-                    flags[hex_id].add("colocation_cluster")
+                sightings[frozenset(group)].append((a.ts, a.lat, a.lon))
+    for hexes, seen in sightings.items():
+        if _pinned_polls(seen, cfg) >= cfg.spoof_cluster_min_polls:
+            for hex_id in hexes:
+                flags[hex_id].add("colocation_cluster")
+
+
+def _pinned_polls(seen: list[tuple[float, float, float]], cfg: DetectionConfig) -> int:
+    """Separate polls (>= cluster_dt_s apart) at which the same aircraft were stacked on the
+    same spot (within cluster_radius_km of the first sighting). A spoofer pins aircraft to one
+    point; airway traffic stacked at different levels passes a point once and moves on."""
+    seen = sorted(seen)
+    t0, lat0, lon0 = seen[0]
+    polls, last = 1, t0
+    for t, lat, lon in seen[1:]:
+        if t - last >= cfg.cluster_dt_s and haversine_km(lat0, lon0, lat, lon) <= cfg.cluster_radius_km:
+            polls, last = polls + 1, t
+    return polls
 
 
 def flag_aircraft(records: list[Record], cfg: DetectionConfig) -> dict[str, list[str]]:
