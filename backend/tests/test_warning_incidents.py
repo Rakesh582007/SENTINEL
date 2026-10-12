@@ -96,3 +96,18 @@ def test_more_cells_of_the_same_jammer_are_explained_but_real_ones_nearby_are_no
     ]
     out = evaluate(gt, detections, CFG, now=1000, coverage={}, flag_log=[])
     assert (out["detected"], out["unexplained_alarms"], out["unexplained_real_data"]) == (1, 1, 1)
+
+
+def test_incident_remembers_warned_aircraft_and_the_pdf_lists_them():
+    from app.detect.incidents import IncidentTracker
+    t = IncidentTracker()
+    inc = t._open(CELL, "jamming", 1000.0)
+    alert = {"kind": "early_warning", "hex": "abc123", "flight": "AIC151", "h3": CELL, "eta_s": 420,
+             "entry": [31.6, 74.9], "injected": True}
+    t.note_warnings([alert], 1000.0)
+    t.note_warnings([{**alert, "eta_s": 400}], 1005.0)  # same aircraft again: one row, first time kept
+    full = t.get(inc["id"])
+    assert full["n_warned"] == 1 and full["warned"][0]["first_warned_ts"] == 1000.0
+    assert t.summary()[0]["n_warned"] == 1 and "warned" not in t.summary()[0]
+    text = pdf_text(incident_pdf({**full, "aircraft": []}))
+    assert "Aircraft to notify" in text and "AIC151" in text and "does not contact aircraft" in text

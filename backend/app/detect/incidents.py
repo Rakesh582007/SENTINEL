@@ -88,6 +88,25 @@ class IncidentTracker:
                 return inc
         return None
 
+    def note_warnings(self, alerts: list[dict], now: float) -> None:
+        """Remember every aircraft that got an early warning into one of an open incident's
+        hexagons: the "aircraft to notify" list in the report. Kept after the warning ends
+        (the aircraft entered, turned away, or the area cleared), with the first warning time."""
+        for a in alerts:
+            if a.get("kind") != "early_warning" or not a.get("h3"):
+                continue
+            for inc in self._incidents.values():
+                if inc["closed_ts"] is not None or a["h3"] not in inc["cells"]:
+                    continue
+                w = inc.setdefault("warned", {}).get(a["hex"])
+                if w is None:
+                    inc["warned"][a["hex"]] = {"hex": a["hex"], "flight": a.get("flight"), "first_warned_ts": now,
+                                                "eta_s": a.get("eta_s"), "entry": a.get("entry"), "last_warned_ts": now,
+                                                "injected": bool(a.get("injected"))}
+                else:
+                    w["last_warned_ts"] = now
+                    w["flight"] = w["flight"] or a.get("flight")
+
     def _find_replayed(self, cell: str, kind: str, now: float, cfg: DetectionConfig) -> dict | None:
         """Replay jumped back into the time span of an incident we already have (timeline click,
         "replay this incident", or the loop): continue that incident instead of opening a copy.
@@ -105,7 +124,7 @@ class IncidentTracker:
     def _open(self, cell: str, kind: str, now: float) -> dict:
         inc_id = f"{self.id_prefix}{next(self._seq)}"
         inc = {"id": inc_id, "kind": kind, "opened_ts": now, "closed_ts": None, "last_alarm_ts": now,
-               "cells": [cell], "aircraft": {}, "max_frac_bad": 0.0, "peak_aircraft": 0,
+               "cells": [cell], "aircraft": {}, "warned": {}, "max_frac_bad": 0.0, "peak_aircraft": 0,
                "est_lat": None, "est_lon": None, "est_radius_km": None}
         self._incidents[inc_id] = inc
         log.info("incident %s opened (%s) at %s", inc_id, kind, cell)
@@ -171,13 +190,15 @@ class IncidentTracker:
         return any(a["injected"] for a in ac) and any(not a["injected"] for a in ac)
 
     def _view(self, inc: dict, full: bool) -> dict:
-        out = {k: v for k, v in inc.items() if k != "aircraft"}
+        out = {k: v for k, v in inc.items() if k not in ("aircraft", "warned")}
         out["n_aircraft"] = len(inc["aircraft"])
+        out["n_warned"] = len(inc.get("warned", {}))
         out["injected"] = self._injected(inc)
         out["mixed"] = self._mixed(inc)
         out["open"] = inc["closed_ts"] is None
         if full:
             out["aircraft"] = sorted(inc["aircraft"].values(), key=lambda a: a["first_bad_ts"])
+            out["warned"] = sorted(inc.get("warned", {}).values(), key=lambda w: (w["first_warned_ts"] + (w["eta_s"] or 0)))
         return out
 
     def summary(self) -> list[dict]:

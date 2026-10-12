@@ -1,4 +1,6 @@
 import { useStore } from '../../store.js'
+import AlertsPanel from '../panels/AlertsPanel.jsx'
+import IncidentsPanel from '../panels/IncidentsPanel.jsx'
 import ActiveAttacks from './ActiveAttacks.jsx'
 import JammingControls from './JammingControls.jsx'
 import ScenarioRunner from './ScenarioRunner.jsx'
@@ -20,6 +22,8 @@ export default function SimulatorPanel() {
       <JammingControls />
       <SpoofControls />
       <ActiveAttacks />
+      <AlertsPanel title="Aircraft to notify" simulator />
+      <IncidentsPanel title="Test incidents and reports" />
       <SensitivityPanel />
       <ScenarioRunner />
     </div>
