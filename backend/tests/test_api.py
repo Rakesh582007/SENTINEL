@@ -577,6 +577,25 @@ def test_incident_ids_carry_the_run_id(client):
     assert client.get(f"/api/incidents/{inc['id']}/report.pdf").status_code == 200
 
 
+def test_alerts_active_filter(client):
+    """Audit N12: ?active= was ignored."""
+    rt = client.app.state.rt
+    c = (28.47, 77.20)
+    inside = [make(f"{i:06x}", c[0] + (i - 10) * 0.01, c[1]) for i in range(20)]
+    inbound = make("inbnd5", c[0], c[1] - 1.3, track=90.0, gs=450.0)
+    aid = client.post("/api/attacks", json={"kind": "jamming", "center": list(c), "radius_km": 30, "strength": 1.0}).json()["attack_id"]
+    rt.ingest_records(inside + [inbound], now=POLL_TS)
+    rt.compute_tick()
+    [live] = client.get("/api/alerts").json()  # default active=true
+    assert live["hex"] == "inbnd5" and client.get("/api/alerts", params={"active": False}).json() == []
+    client.delete(f"/api/attacks/{aid}")  # the cell clears, so the warning ends
+    rt.clock.set(POLL_TS + 5)
+    rt.compute_tick()
+    assert client.get("/api/alerts").json() == []
+    [ended] = client.get("/api/alerts", params={"active": False}).json()
+    assert (ended["id"], ended["active"], ended["first_ts"], ended["ended_ts"]) == (live["id"], False, POLL_TS, POLL_TS + 5)
+
+
 def test_unknown_ids_are_404_not_500(client):
     assert client.patch("/api/attacks/jam-999", json={"strength": 0.5}).status_code == 404
     assert client.delete("/api/attacks/jam-999").status_code == 404

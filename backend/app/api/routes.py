@@ -50,9 +50,10 @@ async def cells(request: Request):
 
 
 @router.get("/alerts")
-def alerts(request: Request, active: bool = True):
-    rt = rt_of(request)
-    return (rt.last_tick or {}).get("alerts", [])
+async def alerts(request: Request, active: bool = True):
+    """active=true (default): the alerts the latest tick raised. active=false: alerts that have
+    ended (the aircraft passed or the cell cleared), with first_ts / last_ts / ended_ts."""
+    return rt_of(request).alert_history(active)
 
 
 # ---------------------------------------------------------------- mode, region, replay

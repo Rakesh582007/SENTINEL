@@ -91,6 +91,7 @@ class Runtime:
         self.last_cells: dict[str, CellStat] = {}
         self.detections: list[dict] = []  # cells ENTERING jammed/spoofing; input for evaluate.py
         self.flag_log: list[dict] = []  # aircraft newly flagged by spoofing.py; input for evaluate.py
+        self.alert_log: dict[str, dict] = {}  # alert id -> newest copy + first_ts/last_ts/active/ended_ts (GET /api/alerts)
         self._prev_states: dict[str, str] = {}
         self._prev_flagged: set[str] = set()
         # +1 on every replay seek or loop. Detections, spoof flags and ground-truth events carry it,
@@ -161,11 +162,38 @@ class Runtime:
         and keep the incidents (closed at the moment of the jump)."""
         self.window.clear()
         self.incidents.close_all(self.clock.now() if old_now is None else old_now)
+        self._end_alerts(set(), self.clock.now() if old_now is None else old_now)
         self.epoch += 1
         self.injector.epoch = self.epoch  # events reopened by injector.rebase() belong to the new epoch
         self._prev_states.clear()
         self._prev_flagged.clear()
         self.scenario = None  # a time jump cancels a running scenario (its times belong to the old clock)
+
+    ALERT_LOG_MAX = 1000
+
+    def _log_alerts(self, alerts: list[dict], now: float) -> None:
+        """Alert history for GET /api/alerts?active=false: an alert is active while the tick still
+        raises it, and ends when the aircraft passes or the cell clears (HANDOVER §6.3)."""
+        for a in alerts:
+            prev = self.alert_log.get(a["id"])
+            first = prev["first_ts"] if prev and prev["active"] else now
+            self.alert_log[a["id"]] = {**a, "first_ts": first, "last_ts": now, "active": True, "ended_ts": None}
+        self._end_alerts({a["id"] for a in alerts}, now)
+        if len(self.alert_log) > self.ALERT_LOG_MAX:  # forget the oldest ended alerts
+            ended = sorted((a for a in self.alert_log.values() if not a["active"]), key=lambda a: a["ended_ts"])
+            for a in ended[: len(self.alert_log) - self.ALERT_LOG_MAX]:
+                del self.alert_log[a["id"]]
+
+    def _end_alerts(self, still_active: set[str], now: float) -> None:
+        for a in self.alert_log.values():
+            if a["active"] and a["id"] not in still_active:
+                a["active"], a["ended_ts"] = False, now
+
+    def alert_history(self, active: bool) -> list[dict]:
+        """Active alerts (as raised by the latest tick) or ended ones, newest first."""
+        if active:
+            return list((self.last_tick or {}).get("alerts", []))
+        return sorted((dict(a) for a in self.alert_log.values() if not a["active"]), key=lambda a: -a["ended_ts"])
 
     def reset_experiment(self) -> None:
         """Fresh start: empty window, no attacks, no ground truth, no incidents."""
@@ -174,6 +202,7 @@ class Runtime:
         self.incidents.reset()
         self.detections.clear()
         self.flag_log.clear()
+        self.alert_log.clear()
         self._prev_states.clear()
         self._prev_flagged.clear()
         self.scenario = None
@@ -386,6 +415,7 @@ class Runtime:
         mixed_cells = {cell for cell, c in cells.items() if c.state in ALARM_STATES and c.mixed}
         alerts = warning.early_warnings(latest, alarm_cells, cfg, now, injected_cells, mixed_cells)
         alerts += self.sentinel.alerts(time.time())
+        self._log_alerts(alerts, now)
         self.incidents.update(cells, recs, cfg, now, flags)
 
         for a in self.injector.live_attacks(now):
