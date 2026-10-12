@@ -34,6 +34,9 @@ pytest
 python scripts/inspect_recording.py
 ```
 
+**Demo day: run uvicorn WITHOUT `--reload`**; it restarts on file save and wipes attacks and incidents:
+`uvicorn app.main:app --host 0.0.0.0 --port 8000`.
+
 Startup mode comes from `GAW_MODE` (default `replay`: the newest 3 h of `data/recordings`, or the bundled `data/sample` if there are none). Switch at runtime with `POST /api/mode {"mode": "live"}`. Stop `record.py` while the app runs live: the live poller writes recordings itself (`GAW_RECORD_LIVE`).
 
 **Pin the demo recording** with `GAW_REPLAY_FILES` (comma-separated file names from `data/recordings`; `GET /api/recordings` lists them), in the environment or `.env`:
