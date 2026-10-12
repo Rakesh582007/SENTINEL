@@ -179,8 +179,8 @@ def flag_aircraft(records: list[Record], cfg: DetectionConfig) -> dict[str, list
     return {h: sorted(v) for h, v in flags.items() if v}
 
 
-def spoofed_cells(flags: dict[str, list[str]], records: list[Record], cfg: DetectionConfig) -> dict[str, int]:
-    """Cells that turn purple: >= 1 aircraft with strong evidence, or >= cfg.spoof_cell_min_flags with weak."""
+def flagged_by_cell(flags: dict[str, list[str]], records: list[Record], cfg: DetectionConfig) -> dict[str, list[str]]:
+    """Aircraft with spoofing evidence, grouped by the cell of their newest position."""
     spoofed = {h for h, reasons in flags.items() if SPOOF_REASONS.intersection(reasons)}
     if not spoofed:
         return {}
@@ -188,17 +188,19 @@ def spoofed_cells(flags: dict[str, list[str]], records: list[Record], cfg: Detec
     for r in records:
         if r.hex in spoofed and _usable(r) and (r.hex not in newest or r.ts > newest[r.hex].ts):
             newest[r.hex] = r
-    strong: dict[str, int] = defaultdict(int)
-    weak: dict[str, int] = defaultdict(int)
+    out: dict[str, list[str]] = defaultdict(list)
     for r in newest.values():
         cell = cell_of(r, cfg.h3_res)
         if cell:
-            if STRONG_REASONS.intersection(flags[r.hex]):
-                strong[cell] += 1
-            else:
-                weak[cell] += 1
+            out[cell].append(r.hex)
+    return dict(out)
+
+
+def spoofed_cells(flags: dict[str, list[str]], records: list[Record], cfg: DetectionConfig) -> dict[str, int]:
+    """Cells that turn purple: >= 1 aircraft with strong evidence, or >= cfg.spoof_cell_min_flags with weak."""
     out = {}
-    for cell in set(strong) | set(weak):
-        if strong[cell] >= 1 or weak[cell] >= cfg.spoof_cell_min_flags:
-            out[cell] = strong[cell] + weak[cell]
+    for cell, hexes in flagged_by_cell(flags, records, cfg).items():
+        strong = sum(1 for h in hexes if STRONG_REASONS.intersection(flags[h]))
+        if strong >= 1 or len(hexes) - strong >= cfg.spoof_cell_min_flags:
+            out[cell] = len(hexes)
     return out

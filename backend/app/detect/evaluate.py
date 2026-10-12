@@ -82,7 +82,7 @@ def evaluate(ground_truth: list[dict], detections: list[dict], cfg: DetectionCon
         **counts,
         "detection_rate": round(counts["detected"] / scored, 3) if scored else None,
         "unexplained_alarms": len(unexplained),
-        "unexplained_real_data": sum(1 for d in unexplained if not d.get("n_injected")),
+        "unexplained_real_data": sum(1 for d in unexplained if not (d.get("injected") or d.get("n_injected"))),
         "median_time_to_detect_s": round(statistics.median(ttds), 1) if ttds else None,
         "per_event": per_event,
         "note": "Unexplained alarms on live data may be real interference; they are not counted as false alarms.",

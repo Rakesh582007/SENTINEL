@@ -19,6 +19,9 @@ IST_OFFSET_S = 5.5 * 3600
 NAVY = colors.HexColor("#0B1B33")
 ORANGE = colors.HexColor("#F26B1D")
 MAX_ROWS = 25
+INJECTED_BANNER = "INJECTED TEST ATTACK - simulated in the Attack Simulator, not a real-world event."
+MIXED_LINE = ("Also contains real (non-injected) degradation: some aircraft below were affected "
+              "without any simulated attack (marked without \"(injected)\").")
 
 
 def ist(ts: float | None, fmt: str = "%d %b %Y %H:%M:%S") -> str:
@@ -27,8 +30,10 @@ def ist(ts: float | None, fmt: str = "%d %b %Y %H:%M:%S") -> str:
 
 def incident_pdf(incident: dict) -> bytes:
     buf = io.BytesIO()
+    injected = bool(incident.get("injected"))
     doc = SimpleDocTemplate(buf, pagesize=A4, leftMargin=16 * mm, rightMargin=16 * mm, topMargin=14 * mm, bottomMargin=14 * mm,
-                            title=f"GPS Attack Watch incident {incident['id']}", author="GPS Attack Watch (auto-generated)")
+                            title=f"GPS Attack Watch incident {incident['id']}", author="GPS Attack Watch (auto-generated)",
+                            subject=INJECTED_BANNER if injected else "GPS interference incident report")
     ss = getSampleStyleSheet()
     h1 = ParagraphStyle("h1", parent=ss["Title"], textColor=NAVY, fontSize=18, spaceAfter=2)
     body = ParagraphStyle("body", parent=ss["BodyText"], fontSize=9.5, leading=13)
@@ -39,8 +44,11 @@ def incident_pdf(incident: dict) -> bytes:
     n = incident.get("n_aircraft", 0)
     story = [Paragraph("GPS Attack Watch - Incident Report", h1),
              Paragraph(f"Incident {incident['id']} &middot; {kind}", body), Spacer(1, 4 * mm)]
-    if incident.get("injected"):
-        story += [Paragraph("INJECTED TEST ATTACK - simulated in the Attack Simulator, not a real-world event.", banner), Spacer(1, 4 * mm)]
+    if injected:
+        story += [Paragraph(INJECTED_BANNER, banner), Spacer(1, 2 * mm)]
+        if incident.get("mixed"):
+            story.append(Paragraph(MIXED_LINE, body))
+        story.append(Spacer(1, 2 * mm))
 
     facts = [
         ["Opened", ist(incident["opened_ts"])],

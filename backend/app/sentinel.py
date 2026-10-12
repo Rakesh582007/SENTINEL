@@ -125,7 +125,7 @@ class SentinelStore:
             if e["server_status"] in ("JAMMING", "SPOOF"):
                 out.append({"id": f"sentinel-{e['id']}", "kind": f"sentinel_{e['server_status'].lower()}",
                             "device": e["id"], "lat": e.get("lat"), "lon": e.get("lon"), "severity": "high",
-                            "label": "SIGNAL TEST (antenna covered)", "injected": False,
+                            "label": "SIGNAL TEST (antenna covered)", "injected": False, "mixed": False,
                             "message": f"{e['id']}: {e['server_status']} - {e['server_reason']}"})
         return out
 

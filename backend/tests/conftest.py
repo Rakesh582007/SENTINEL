@@ -29,6 +29,19 @@ def real_amritsar() -> dict:
     return json.loads((FIXTURES / "adsbfi_amritsar_20261011.json").read_text())
 
 
+def pdf_text(pdf: bytes) -> str:
+    """Decoded page content of a ReportLab PDF (ASCII85 + Flate streams), for text assertions."""
+    import base64
+    import re
+    import zlib
+
+    out = []
+    for m in re.finditer(rb"/ASCII85Decode /FlateDecode \][^>]*>>\s*stream\r?\n(.*?)endstream", pdf, re.S):
+        data = m.group(1).strip()
+        out.append(zlib.decompress(base64.a85decode(data.removesuffix(b"~>"))).decode("latin-1"))
+    return "\n".join(out)
+
+
 def make(hex_id: str, lat: float, lon: float, ts: float = POLL_TS, **kw) -> Record:
     """A healthy airborne ADS-B record; override any field with kwargs."""
     base = dict(ts=ts, poll_ts=ts, hex=hex_id, source=kw.pop("source", "test"), lat=lat, lon=lon,

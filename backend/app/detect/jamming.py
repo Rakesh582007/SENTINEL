@@ -33,6 +33,10 @@ class CellStat:
     n_injected: int = 0  # bad aircraft whose badness came from a simulated attack
     bad_hexes: list[str] = field(default_factory=list)
     reasons: dict[str, int] = field(default_factory=dict)  # reason code -> aircraft count
+    injected_hexes: list[str] = field(default_factory=list)  # the bad aircraft counted in n_injected
+    # Set by label_injection(): any simulated effect in this cell / both simulated and real ones.
+    injected: bool = False
+    mixed: bool = False
 
     def to_props(self) -> dict:
         return {
@@ -44,6 +48,8 @@ class CellStat:
             "lower_bound": round(self.lower_bound, 3),
             "n_injected": self.n_injected,
             "reasons": self.reasons,
+            "injected": self.injected,
+            "mixed": self.mixed,
         }
 
 
@@ -123,7 +129,7 @@ def classify_cells(records: Iterable[Record], cfg: DetectionConfig) -> dict[str,
         reasons: dict[str, int] = defaultdict(int)
         for why in bad_here.values():
             reasons[why] += 1
-        out[cell] = CellStat(
+        out[cell] = c = CellStat(
             h3=cell,
             n_aircraft=n,
             n_bad=k,
@@ -133,8 +139,26 @@ def classify_cells(records: Iterable[Record], cfg: DetectionConfig) -> dict[str,
             n_injected=len(injected.get(cell, ())),
             bad_hexes=sorted(bad_here),
             reasons=dict(reasons),
+            injected_hexes=sorted(injected.get(cell, ())),
         )
+        label_injection(c)
     return out
+
+
+def label_injection(c: CellStat, spoof_flagged: Iterable[str] = (), injected_aircraft: set[str] | frozenset = frozenset()) -> None:
+    """Mark a cell injected if ANY bad or spoof-flagged aircraft in it carries a simulated
+    effect, and mixed if real (non-injected) bad or flagged aircraft are there too.
+
+    spoof_flagged: aircraft in this cell with spoofing evidence; injected_aircraft: every
+    aircraft that has injected records in the window.
+    """
+    inj = set(c.injected_hexes)
+    real = set(c.bad_hexes) - inj
+    for h in spoof_flagged:
+        (inj if h in injected_aircraft else real).add(h)
+    real -= inj
+    c.injected = bool(inj)
+    c.mixed = bool(inj) and bool(real)
 
 
 def cell_polygon(cell: str) -> list[list[float]]:

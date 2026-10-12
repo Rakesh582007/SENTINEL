@@ -147,13 +147,21 @@ class IncidentTracker:
     # ------------------------------------------------------------------ views
     @staticmethod
     def _injected(inc: dict) -> bool:
+        """ANY simulated aircraft makes the incident a test (one real low-NACp aircraft in the
+        area must not make a simulated attack look real)."""
+        return any(a["injected"] for a in inc["aircraft"].values())
+
+    @staticmethod
+    def _mixed(inc: dict) -> bool:
+        """Simulated and real (non-injected) affected aircraft in the same incident."""
         ac = inc["aircraft"].values()
-        return bool(ac) and all(a["injected"] for a in ac)
+        return any(a["injected"] for a in ac) and any(not a["injected"] for a in ac)
 
     def _view(self, inc: dict, full: bool) -> dict:
         out = {k: v for k, v in inc.items() if k != "aircraft"}
         out["n_aircraft"] = len(inc["aircraft"])
         out["injected"] = self._injected(inc)
+        out["mixed"] = self._mixed(inc)
         out["open"] = inc["closed_ts"] is None
         if full:
             out["aircraft"] = sorted(inc["aircraft"].values(), key=lambda a: a["first_bad_ts"])

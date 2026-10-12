@@ -9,7 +9,7 @@ from app.ingest.poller import LivePoller
 from app.ingest.recording import append_line, make_line
 from app.ingest.replay import Replayer
 from app.main import app
-from conftest import POLL_TS, make
+from conftest import POLL_TS, make, pdf_text
 
 
 @pytest.fixture
@@ -235,6 +235,45 @@ def test_live_poller_survives_an_error_and_reports_it(client, real_amritsar, mon
     assert "bad answer" in poller.last_error
     assert asyncio.run(poller.poll_guarded(FakeHttp(), rt.points[0], "adsb.fi")) is True
     assert len(rt.window) > 0
+
+
+def test_simulated_spoof_turns_cell_purple_and_its_warning_is_injected(client):
+    """Audit C1 + S13: the spoof overlay in compute_tick, end to end through the API."""
+    rt = client.app.state.rt
+    rt.ingest_records([make(f"{i:06x}", 31.6 + i * 0.01, 77.2, ts=POLL_TS - 5) for i in range(8)], now=POLL_TS)
+    assert client.post("/api/attacks", json={"kind": "spoof", "hex": "000003", "offset_km": 30, "bearing_deg": 90}).status_code == 200
+    rt.clock.set(POLL_TS + 10)
+    later = [make(f"{i:06x}", 31.63 + i * 0.01, 77.2, ts=POLL_TS + 10, track=0.0) for i in range(8)]
+    inbound = make("inbnd2", 31.4, 76.2, ts=POLL_TS + 10, track=90.0, gs=450.0)  # flying east toward the fake position
+    rt.ingest_records(later + [inbound], now=POLL_TS + 10)
+    t = rt.compute_tick()
+    [purple] = [f["properties"] for f in t["cells"]["features"] if f["properties"]["state"] == "spoofing"]
+    assert purple["injected"] is True and purple["mixed"] is False
+    assert any(f["hex"] == "000003" and "impossible_jump" in f["reasons"] for f in rt.flag_log)
+    [ew] = [a for a in t["alerts"] if a["kind"] == "early_warning"]
+    assert ew["hex"] == "inbnd2" and ew["cell_state"] == "spoofing" and ew["injected"] is True and ew["mixed"] is False
+    assert [(i["kind"], i["injected"], i["mixed"]) for i in t["incidents_summary"]] == [("spoofing", True, False)]
+
+
+def test_simulated_jammer_with_one_real_bad_aircraft_is_injected_and_mixed(client):
+    rt = client.app.state.rt
+    c = (28.47, 77.20)
+    inside = [make(f"{i:06x}", c[0] + (i - 10) * 0.01, c[1]) for i in range(20)]
+    real_bad = make("realbd", c[0] + 0.45, c[1] - 0.1, nac_p=6)  # same res-3 cell, ~51 km out: not jammed by us
+    inbound = make("inbnd4", c[0], c[1] - 1.3, track=90.0, gs=450.0)
+    client.post("/api/attacks", json={"kind": "jamming", "center": list(c), "radius_km": 30, "strength": 1.0, "position_loss": 0.0})
+    rt.ingest_records(inside + [real_bad, inbound], now=POLL_TS)
+    t = rt.compute_tick()
+    [cell] = [f["properties"] for f in t["cells"]["features"] if f["properties"]["state"] == "jammed"]
+    assert (cell["n_bad"], cell["n_injected"], cell["injected"], cell["mixed"]) == (21, 20, True, True)
+    [ew] = [a for a in t["alerts"] if a["kind"] == "early_warning"]
+    assert ew["injected"] is True and ew["mixed"] is True
+    [inc] = t["incidents_summary"]
+    assert inc["injected"] is True and inc["mixed"] is True
+    pdf = client.get(f"/api/incidents/{inc['id']}/report.pdf").content
+    assert b"INJECTED" in pdf  # document subject
+    text = pdf_text(pdf)
+    assert "INJECTED TEST ATTACK" in text and "Also contains real" in text  # banner + mixed line on the page
 
 
 def test_unknown_ids_are_404_not_500(client):

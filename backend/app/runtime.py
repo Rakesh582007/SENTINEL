@@ -27,7 +27,7 @@ from app.detect import spoofing, warning
 from app.detect.spoofing import SPOOF_REASONS
 from app.detect.geo import haversine_km
 from app.detect.incidents import IncidentTracker
-from app.detect.jamming import CellStat, bad_reason, classify_cells, to_geojson
+from app.detect.jamming import CellStat, bad_reason, classify_cells, label_injection, to_geojson
 from app.ingest.injector import Injector, count_inside
 from app.ingest.normalize import normalize_response
 from app.ingest.poller import LivePoller
@@ -285,17 +285,24 @@ class Runtime:
                 c = cells.get(cell) or CellStat(h3=cell, n_aircraft=n_flagged, n_bad=0, frac_bad=0.0, lower_bound=0.0, state="spoofing")
                 c.state = "spoofing"
                 cells[cell] = c
+        # Injected = ANY simulated effect in the cell; mixed = simulated and real ones together.
+        injected_aircraft = {r.hex for r in recs if r.injected}
+        flagged = spoofing.flagged_by_cell(flags, recs, cfg)
+        for cell, c in cells.items():
+            label_injection(c, flagged.get(cell, ()), injected_aircraft)
 
         for cell, c in cells.items():
             if c.state in ALARM_STATES and self._prev_states.get(cell) != c.state:
                 self.detections.append({"ts": now, "h3": cell, "state": c.state, "n_bad": c.n_bad,
-                                        "n_aircraft": c.n_aircraft, "n_injected": c.n_injected})
+                                        "n_aircraft": c.n_aircraft, "n_injected": c.n_injected,
+                                        "injected": c.injected, "mixed": c.mixed})
         self._prev_states = {cell: c.state for cell, c in cells.items()}
 
         latest = self.latest_aircraft()
         alarm_cells = {cell: c.state for cell, c in cells.items() if c.state in ALARM_STATES}
-        injected_cells = {cell for cell, c in cells.items() if c.state in ALARM_STATES and c.n_bad and c.n_injected == c.n_bad}
-        alerts = warning.early_warnings(latest, alarm_cells, cfg, now, injected_cells)
+        injected_cells = {cell for cell, c in cells.items() if c.state in ALARM_STATES and c.injected}
+        mixed_cells = {cell for cell, c in cells.items() if c.state in ALARM_STATES and c.mixed}
+        alerts = warning.early_warnings(latest, alarm_cells, cfg, now, injected_cells, mixed_cells)
         alerts += self.sentinel.alerts(time.time())
         self.incidents.update(cells, recs, cfg, now, flags)
 
