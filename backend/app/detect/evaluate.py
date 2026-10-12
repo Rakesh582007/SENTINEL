@@ -37,8 +37,6 @@ from app.config import DetectionConfig
 from app.detect.geo import haversine_km
 from app.detect.spoofing import SPOOF_REASONS
 
-SLACK_S = 15.0  # a detection logged up to one poll before the recorded start still counts
-
 
 def _cell_overlaps(cell: str, center, radius_km: float) -> bool:
     lat, lon = h3.cell_to_latlng(cell)
@@ -53,24 +51,25 @@ def evaluate(ground_truth: list[dict], detections: list[dict], cfg: DetectionCon
         ev_epoch = ev.get("epoch", 0)
         start, window_end = ev["start_ts"], ev["start_ts"] + cfg.eval_detect_within_s
         hit = None
+        slack = cfg.eval_slack_s  # a detection logged up to one poll before the recorded start still counts
         if ev["kind"] == "jamming":
             # Injected records stay in the window for jam_window_s after the event ends.
             active_until = (ev["end_ts"] if ev["end_ts"] is not None else now) + cfg.jam_window_s
             for i, d in enumerate(detections):
                 if d.get("epoch", 0) != ev_epoch or d["state"] != "jammed" or not _cell_overlaps(d["h3"], ev["center"], ev["radius_km"]):
                     continue
-                if hit is None and start - SLACK_S <= d["ts"] <= window_end:
+                if hit is None and start - slack <= d["ts"] <= window_end:
                     hit = d  # the first (earliest) cell to go red: time to detect
                     used.add(i)
-                elif start - SLACK_S <= d["ts"] <= active_until and (d.get("injected") or d.get("n_injected")):
+                elif start - slack <= d["ts"] <= active_until and (d.get("injected") or d.get("n_injected")):
                     used.add(i)  # more cells of the same simulated jammer are explained, not "unexplained"
         else:
             for f in flag_log:
-                if f.get("epoch", 0) == ev_epoch and f["hex"] == ev["hex"] and start - SLACK_S <= f["ts"] <= window_end and SPOOF_REASONS.intersection(f["reasons"]):
+                if f.get("epoch", 0) == ev_epoch and f["hex"] == ev["hex"] and start - slack <= f["ts"] <= window_end and SPOOF_REASONS.intersection(f["reasons"]):
                     hit = f
                     break
             for i, d in enumerate(detections):  # the purple cell it caused is explained too
-                if d.get("epoch", 0) == ev_epoch and d["state"] == "spoofing" and start - SLACK_S <= d["ts"] <= window_end:
+                if d.get("epoch", 0) == ev_epoch and d["state"] == "spoofing" and start - slack <= d["ts"] <= window_end:
                     used.add(i)
         # Coverage is stored on the event (survives DELETE); `coverage` is the fallback for older events.
         inside = ev.get("max_aircraft_inside")

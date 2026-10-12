@@ -58,11 +58,6 @@ from app.detect.jamming import cell_of
 from app.detect.stats import median_mad
 from app.records import Record
 
-MIN_ALT_FOR_OFFSET_FT = 5000  # below this, QNH settings and terrain make the offset noisy
-TRACK_CHECK_MAX_DT_S = 20.0  # longer gaps can hide a legitimate turn (3 deg/s turn = 60 deg in 20 s)
-TRACK_CHECK_MIN_KM = 1.0  # shorter hops are dominated by position noise
-CLUSTER_LOOKBACK_S = 120.0  # only recent positions for the O(n^2) cluster check
-
 STRONG_REASONS = frozenset({"impossible_jump", "colocation_cluster"})
 WEAK_REASONS = frozenset({"alt_offset_outlier", "track_mismatch"})
 SPOOF_REASONS = STRONG_REASONS | WEAK_REASONS
@@ -131,12 +126,12 @@ def _jump_and_track(tracks: dict[str, list[Record]], cfg: DetectionConfig, flags
                     jumps.append((r.poll_ts, hex_id))
             elif (
                 r.track is not None and prev.track is not None and r.gs is not None
-                and r.gs > cfg.track_mismatch_min_gs_kt and dt <= TRACK_CHECK_MAX_DT_S and d >= TRACK_CHECK_MIN_KM
+                and r.gs > cfg.track_mismatch_min_gs_kt and dt <= cfg.track_check_max_dt_s and d >= cfg.track_check_min_km
                 and angle_diff_deg(_mean_heading(prev.track, r.track),
                                    initial_bearing_deg(prev.lat, prev.lon, r.lat, r.lon)) > cfg.track_mismatch_deg
             ):
                 mismatches += 1
-                if mismatches >= 2:
+                if mismatches >= cfg.track_mismatch_min_count:
                     flags[hex_id].add("track_mismatch")
             before, prev = prev, r
     # Many different aircraft "jumping" in the same poll is the feed, not a spoofer.
@@ -159,9 +154,9 @@ def _alt_offset(tracks: dict[str, list[Record]], cfg: DetectionConfig, flags: di
     for hex_id, rs in tracks.items():
         picked = []
         for r in reversed(rs):
-            if r.ts < newest_ts - cfg.alt_peer_window_s or len(picked) == 3:
+            if r.ts < newest_ts - cfg.alt_peer_window_s or len(picked) == cfg.alt_recent_readings:
                 break
-            if r.alt_geom is not None and r.alt_baro is not None and r.alt_baro >= MIN_ALT_FOR_OFFSET_FT and r.gps_sourced:
+            if r.alt_geom is not None and r.alt_baro is not None and r.alt_baro >= cfg.alt_min_alt_ft and r.gps_sourced:
                 picked.append(r)
         if picked:
             recent[hex_id] = picked
@@ -180,7 +175,7 @@ def _alt_offset(tracks: dict[str, list[Record]], cfg: DetectionConfig, flags: di
             1 for x in readings
             if abs((x.alt_geom - x.alt_baro) - med * x.alt_baro) > max(cfg.alt_abs_ft, cfg.alt_mad_k * mad * x.alt_baro)
         )
-        if outliers >= min(2, len(readings)):
+        if outliers >= min(cfg.alt_outlier_min_count, len(readings)):
             flags[hex_id].add("alt_offset_outlier")
 
 
@@ -188,7 +183,7 @@ def _clusters(tracks: dict[str, list[Record]], cfg: DetectionConfig, flags: dict
     newest_ts = max((rs[-1].ts for rs in tracks.values() if rs), default=None)
     if newest_ts is None:
         return
-    recent = [r for rs in tracks.values() for r in rs if r.ts >= newest_ts - CLUSTER_LOOKBACK_S and r.alt_baro is not None]
+    recent = [r for rs in tracks.values() for r in rs if r.ts >= newest_ts - cfg.cluster_lookback_s and r.alt_baro is not None]
     recent.sort(key=lambda r: r.ts)
     sightings: dict[frozenset, list[tuple[float, float, float]]] = defaultdict(list)  # aircraft set -> (ts, lat, lon)
     for i, a in enumerate(recent):

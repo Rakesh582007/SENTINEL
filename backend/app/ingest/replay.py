@@ -20,6 +20,7 @@ import logging
 import time
 from pathlib import Path
 
+from app.config import get_detection
 from app.ingest.normalize import normalize_line
 from app.ingest.recording import iter_recording, list_recordings
 from app.records import Record
@@ -27,7 +28,6 @@ from app.records import Record
 log = logging.getLogger("gaw.replay")
 
 SAMPLE_DIR = Path(__file__).resolve().parents[3] / "data" / "sample"
-GAP_S = 120.0  # a pause in the recording longer than this is skipped, not replayed as an empty map
 
 
 def stamp_of(path: Path) -> str:
@@ -96,10 +96,11 @@ class Replayer:
     def segments(self) -> list[tuple[float, float]]:
         """Continuous stretches of data (a recorder test run, a restart or a frozen window leaves gaps)."""
         segs, start = [], None
+        gap_s = get_detection().replay_gap_s
         for i, t in enumerate(self.times):
             if start is None:
                 start = t
-            elif t - self.times[i - 1] > GAP_S:
+            elif t - self.times[i - 1] > gap_s:
                 segs.append((start, self.times[i - 1]))
                 start = t
         if start is not None:
@@ -141,7 +142,7 @@ class Replayer:
         if self.paused or self.finished or not self.frames:
             return
         target = self.rt.clock.now() + dt * self.speed
-        if self.idx < len(self.frames) and self.frames[self.idx][0] - target > GAP_S:
+        if self.idx < len(self.frames) and self.frames[self.idx][0] - target > get_detection().replay_gap_s:
             target = self.frames[self.idx][0]  # skip dead air in the recording
         try:
             self._emit_until(target)

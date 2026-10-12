@@ -51,7 +51,9 @@ class Runtime:
         self.window = Window(settings.window_keep_s)
         self.injector = Injector()
         self.incidents = IncidentTracker()
-        self.sentinel = SentinelStore(settings.sentinel_offline_s, settings.sentinel_history_max)
+        self.sentinel = SentinelStore(settings.sentinel_offline_s, settings.sentinel_history_max, settings.sentinel_baseline_s,
+                                      settings.sentinel_snr_drop_db, settings.sentinel_fix_loss_s, settings.sentinel_move_m,
+                                      settings.sentinel_alt_jump_m)
         self.mode = settings.mode
         self.region_name = settings.region
         self.points: tuple[QueryPoint, ...] = get_region(settings.region)

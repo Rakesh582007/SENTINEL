@@ -24,14 +24,16 @@ from __future__ import annotations
 import statistics
 from collections import deque
 
+from app.config import Settings
 from app.detect.geo import haversine_km
 
 STATUSES = ("OK", "SEARCHING", "JAMMING", "SPOOF", "OFFLINE")
-BASELINE_S = 120.0
-SNR_DROP_DB = 10.0
-FIX_LOSS_S = 5.0
-MOVE_M = 50.0
-ALT_JUMP_M = 100.0
+# Defaults of the server rules; the numbers live in config.Settings (sentinel_*), override via GAW_SENTINEL_*.
+BASELINE_S: float = Settings.model_fields["sentinel_baseline_s"].default
+SNR_DROP_DB: float = Settings.model_fields["sentinel_snr_drop_db"].default
+FIX_LOSS_S: float = Settings.model_fields["sentinel_fix_loss_s"].default
+MOVE_M: float = Settings.model_fields["sentinel_move_m"].default
+ALT_JUMP_M: float = Settings.model_fields["sentinel_alt_jump_m"].default
 
 
 def normalize_status(raw) -> str:
@@ -59,9 +61,12 @@ class _DeviceState:
 
 
 class SentinelStore:
-    def __init__(self, offline_s: float, max_len: int) -> None:
+    def __init__(self, offline_s: float, max_len: int, baseline_s: float = BASELINE_S, snr_drop_db: float = SNR_DROP_DB,
+                 fix_loss_s: float = FIX_LOSS_S, move_m: float = MOVE_M, alt_jump_m: float = ALT_JUMP_M) -> None:
         self.offline_s = offline_s
         self.max_len = max_len
+        self.baseline_s, self.snr_drop_db, self.fix_loss_s = baseline_s, snr_drop_db, fix_loss_s
+        self.move_m, self.alt_jump_m = move_m, alt_jump_m
         self.packets: dict[str, deque] = {}
         self.state: dict[str, _DeviceState] = {}
 
@@ -70,7 +75,7 @@ class SentinelStore:
         snr, lat, lon, alt = _num(p.get("avg_snr")), _num(p.get("lat")), _num(p.get("lon")), _num(p.get("alt"))
         if not fix:
             st.fix_since = None
-            if st.baseline_snr is not None and st.last_fix_ts is not None and now - st.last_fix_ts > FIX_LOSS_S:
+            if st.baseline_snr is not None and st.last_fix_ts is not None and now - st.last_fix_ts > self.fix_loss_s:
                 return "JAMMING", f"fix lost for {now - st.last_fix_ts:.0f} s"
             return ("SEARCHING", "no fix yet") if st.baseline_snr is None else ("OK", None)
         st.last_fix_ts = now
@@ -79,7 +84,7 @@ class SentinelStore:
         if st.baseline_snr is None:
             if snr is not None:
                 st.calib.append((snr, lat, lon, alt))
-            if now - st.fix_since >= BASELINE_S and st.calib:
+            if now - st.fix_since >= self.baseline_s and st.calib:
                 st.baseline_snr = statistics.median(c[0] for c in st.calib)
                 pos = [c for c in st.calib if c[1] is not None and c[2] is not None]
                 if pos:
@@ -88,13 +93,13 @@ class SentinelStore:
                               statistics.median(alts) if alts else None)
                 st.calib.clear()
             return "OK", "learning baseline" if st.baseline_snr is None else None
-        if snr is not None and snr <= st.baseline_snr - SNR_DROP_DB:
+        if snr is not None and snr <= st.baseline_snr - self.snr_drop_db:
             return "JAMMING", f"signal {st.baseline_snr - snr:.0f} dB below baseline"
         if st.ref and lat is not None and lon is not None:
             moved_m = haversine_km(lat, lon, st.ref[0], st.ref[1]) * 1000
-            if moved_m > MOVE_M:
+            if moved_m > self.move_m:
                 return "SPOOF", f"fixed box appears to move {moved_m:.0f} m"
-            if alt is not None and st.ref[2] is not None and abs(alt - st.ref[2]) > ALT_JUMP_M:
+            if alt is not None and st.ref[2] is not None and abs(alt - st.ref[2]) > self.alt_jump_m:
                 return "SPOOF", f"altitude jumped {abs(alt - st.ref[2]):.0f} m"
         return "OK", None
 

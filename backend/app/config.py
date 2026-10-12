@@ -58,6 +58,12 @@ class Settings(BaseSettings):
     # Ground Sentinel (ESP32 box)
     sentinel_offline_s: float = 10.0
     sentinel_history_max: int = 2000  # packets kept per device (~66 min at one packet per 2 s)
+    # Server re-check of the box's alarms (sentinel.py; wall clock, it is real hardware)
+    sentinel_baseline_s: float = Field(120.0, ge=10.0)  # fix held this long before baseline SNR + position are learned
+    sentinel_snr_drop_db: float = Field(10.0, gt=0.0)  # JAMMING: avg SNR this far below the baseline
+    sentinel_fix_loss_s: float = Field(5.0, gt=0.0)  # JAMMING: fix lost this long after a baseline existed
+    sentinel_move_m: float = Field(50.0, gt=0.0)  # SPOOF: the fixed box "moves" this far from its reference
+    sentinel_alt_jump_m: float = Field(100.0, gt=0.0)  # SPOOF: its altitude jumps this much
 
     @property
     def replay_file_list(self) -> list[str]:
@@ -108,10 +114,18 @@ class DetectionConfig(BaseModel):
     spoof_mass_jump_min: int = Field(3, ge=2, le=50)  # this many aircraft jumping in one poll = feed glitch
     spoof_mass_jump_window_s: float = Field(10.0, ge=1.0, le=120.0)  # "one poll" = landings this close in time
     spoof_cluster_min_polls: int = Field(2, ge=1, le=10)  # a co-location must persist, pinned in place, this many polls
+    alt_min_alt_ft: int = Field(5000, ge=0, le=20000)  # below this, QNH settings and terrain make the offset noisy
+    alt_recent_readings: int = Field(3, ge=1, le=10)  # newest readings per aircraft checked for an altitude offset...
+    alt_outlier_min_count: int = Field(2, ge=1, le=10)  # ...this many must be outliers (or all of them, if fewer)
+    track_check_max_dt_s: float = Field(20.0, ge=5.0, le=120.0)  # longer gaps can hide a legitimate turn (3 deg/s = 60 deg in 20 s)
+    track_check_min_km: float = Field(1.0, ge=0.1, le=20.0)  # shorter hops are dominated by position noise
+    track_mismatch_min_count: int = Field(2, ge=1, le=10)  # a track mismatch must repeat this often
+    cluster_lookback_s: float = Field(120.0, ge=10.0, le=600.0)  # only recent positions for the O(n^2) cluster check
 
     # §6.3 early warning
     warn_horizon_s: int = Field(900, ge=60, le=3600)
     warn_step_s: int = Field(30, ge=5, le=300)
+    warn_min_gs_kt: float = Field(60.0, ge=0.0, le=300.0)  # slower = taxiing, holding low or a helicopter: no projection
 
     # §6.4 incidents
     incident_close_s: int = Field(600, ge=30, le=7200)
@@ -120,6 +134,10 @@ class DetectionConfig(BaseModel):
 
     # §6.5 evaluation
     eval_detect_within_s: int = Field(300, ge=30, le=3600)
+    eval_slack_s: float = Field(15.0, ge=0.0, le=120.0)  # a detection logged up to one poll before the recorded start still counts
+
+    # Replay
+    replay_gap_s: float = Field(120.0, ge=30.0, le=3600.0)  # a pause in the recording longer than this is skipped, not replayed
 
     @model_validator(mode="after")
     def _step_within_horizon(self) -> DetectionConfig:
