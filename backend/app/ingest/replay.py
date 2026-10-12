@@ -143,7 +143,9 @@ class Replayer:
             return
         target = self.rt.clock.now() + dt * self.speed
         if self.idx < len(self.frames) and self.frames[self.idx][0] - target > get_detection().replay_gap_s:
-            target = self.frames[self.idx][0]  # skip dead air in the recording
+            # Skip dead air in the recording; running attacks keep their remaining duration.
+            self.rt.injector.shift(self.frames[self.idx][0] - target)
+            target = self.frames[self.idx][0]
         try:
             self._emit_until(target)
         finally:

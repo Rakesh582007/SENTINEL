@@ -596,6 +596,24 @@ def test_alerts_active_filter(client):
     assert (ended["id"], ended["active"], ended["first_ts"], ended["ended_ts"]) == (live["id"], False, POLL_TS, POLL_TS + 5)
 
 
+def test_skipping_a_gap_in_the_recording_does_not_use_up_a_timed_attack(tmp_path, client, real_amritsar):
+    """Audit N15: the replay jumped the clock over dead air and timed attacks expired at once."""
+    rt = client.app.state.rt
+    for t in [POLL_TS + 10 * i for i in range(6)] + [POLL_TS + 1000 + 10 * i for i in range(6)]:  # 950 s gap
+        append_line(tmp_path, make_line(t, "adsb.fi", {"name": "amritsar"}, 200, 300, None, real_amritsar), "r000015")
+    rep = Replayer(rt, sorted(tmp_path.glob("rec_*.jsonl.gz")))
+    rep.load()
+    rep.seek(POLL_TS + 40)
+    aid = client.post("/api/attacks", json={"kind": "jamming", "center": DELHI, "radius_km": 60, "strength": 1.0,
+                                            "duration_s": 300}).json()["attack_id"]
+    advance(rep, 20)  # normal playback to +60: 280 s left
+    advance(rep, 20)  # the next frame is 920 s away: skipped
+    assert rt.clock.now() == POLL_TS + 1000
+    a = rt.injector.attacks[aid]
+    assert a.live(rt.clock.now()) and a.remaining_s(rt.clock.now()) == 260  # 280 minus the 20 s actually played
+    assert any(r.injected == aid for r in rt.window.all() if r.poll_ts >= POLL_TS + 1000)
+
+
 def test_unknown_ids_are_404_not_500(client):
     assert client.patch("/api/attacks/jam-999", json={"strength": 0.5}).status_code == 404
     assert client.delete("/api/attacks/jam-999").status_code == 404

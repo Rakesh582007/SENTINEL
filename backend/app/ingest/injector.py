@@ -169,6 +169,17 @@ class Injector:
                 self._close_event(a.id, old_now)
                 self._open_event(a, new_now)
 
+    def shift(self, delta: float) -> None:
+        """Replay skipped `delta` s of dead air (a gap in the recording): move the timers of
+        running attacks forward, so the gap does not use up their duration. Ground-truth events
+        stay as they are (shifting their start could undo detections made before the gap)."""
+        for a in self.attacks.values():
+            if a.ended_ts is not None:
+                continue
+            a.created_ts += delta
+            a.activated_ts += delta
+            a.frozen = {h: (lat, lon, t + delta) for h, (lat, lon, t) in a.frozen.items()}
+
     def clear_all(self) -> None:
         """Forget attacks AND ground truth (mode switch = a fresh experiment)."""
         self.attacks.clear()
