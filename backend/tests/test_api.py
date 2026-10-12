@@ -381,6 +381,34 @@ def test_incidents_and_their_pdf_survive_a_replay_seek(tmp_path, client, real_am
     assert r.status_code == 200 and r.content[:4] == b"%PDF"
 
 
+def test_after_a_loop_a_missed_event_stays_missed(tmp_path, client, real_amritsar):
+    """Audit S8: the clock jumping back used to flip 'missed' back to 'pending'."""
+    rt = client.app.state.rt
+    rep = replay_of(tmp_path, rt, real_amritsar, n=60)
+    rep.seek(rep.t_start + 60)
+    client.post("/api/attacks", json={"kind": "jamming", "center": DELHI, "radius_km": 60, "strength": 0.0})
+    advance(rep, 360)  # past the 300 s detection allowance, nothing detected
+    rt.compute_tick()
+    assert [e[1] for e in outcomes(client)] == ["missed"]
+    rep.seek(rep.t_start + 60)  # what the replay loop does
+    assert [e[1] for e in outcomes(client)] == ["missed", "pending"]  # old event done; reopened event is new
+
+
+def test_after_a_loop_old_detections_do_not_match_the_reopened_event(tmp_path, client, real_amritsar):
+    rt = client.app.state.rt
+    rep = replay_of(tmp_path, rt, real_amritsar, n=60)
+    rep.seek(rep.t_start + 100)
+    client.post("/api/attacks", json={"kind": "jamming", "center": DELHI, "radius_km": 60, "strength": 1.0})
+    advance(rep, 60)
+    rt.compute_tick()
+    assert [e[1] for e in outcomes(client)] == ["detected"]
+    rep.seek(rep.t_start + 60)  # 100 s back: the old detection's time falls inside the reopened event's window
+    assert [e[1] for e in outcomes(client)] == ["detected", "pending"]  # used to be detected by the stale alarm
+    advance(rep, 60)
+    rt.compute_tick()  # the attack is still on: the cell goes red again in the new epoch
+    assert [e[1] for e in outcomes(client)] == ["detected", "detected"]
+
+
 def test_unknown_ids_are_404_not_500(client):
     assert client.patch("/api/attacks/jam-999", json={"strength": 0.5}).status_code == 404
     assert client.delete("/api/attacks/jam-999").status_code == 404

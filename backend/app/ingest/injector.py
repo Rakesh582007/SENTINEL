@@ -94,6 +94,7 @@ class Injector:
         self.attacks: dict[str, Attack] = {}
         self.ground_truth: list[dict] = []
         self._seq = itertools.count(1)
+        self.epoch = 0  # replay time-jump counter (Runtime.epoch); stamped on every ground-truth event
 
     # ---- lifecycle -------------------------------------------------------
     def add_jamming(self, center: tuple[float, float], radius_km: float, strength: float, position_loss: float, duration_s: float | None, now: float) -> Attack:
@@ -247,7 +248,7 @@ class Injector:
             "center": a.center, "radius_km": a.radius_km, "strength": a.strength,
             "position_loss": a.position_loss, "hex": a.hex, "offset_km": a.offset_km,
             "bearing_deg": a.bearing_deg, "alt_offset_ft": a.alt_offset_ft,
-            "max_aircraft_inside": 0,
+            "max_aircraft_inside": 0, "epoch": self.epoch,
         })
 
     def _refresh_event(self, a: Attack) -> None:

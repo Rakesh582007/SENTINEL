@@ -68,6 +68,9 @@ class Runtime:
         self.flag_log: list[dict] = []  # aircraft newly flagged by spoofing.py; input for evaluate.py
         self._prev_states: dict[str, str] = {}
         self._prev_flagged: set[str] = set()
+        # +1 on every replay seek or loop. Detections, spoof flags and ground-truth events carry it,
+        # and evaluation only matches within one epoch (replay time is not monotonic across a jump).
+        self.epoch = 0
         self.scenario: dict | None = None  # {"id", "start_ts", "pending": [(fire_ts, attack_body)], "fired": [...]}
         self.db = None
 
@@ -122,6 +125,8 @@ class Runtime:
         and keep the incidents (closed at the moment of the jump)."""
         self.window.clear()
         self.incidents.close_all(self.clock.now() if old_now is None else old_now)
+        self.epoch += 1
+        self.injector.epoch = self.epoch  # events reopened by injector.rebase() belong to the new epoch
         self._prev_states.clear()
         self._prev_flagged.clear()
         self.scenario = None  # a time jump cancels a running scenario (its times belong to the old clock)
@@ -303,7 +308,7 @@ class Runtime:
         flags = spoofing.flag_aircraft(recs, cfg)
         spoof_flagged = {h for h, why in flags.items() if SPOOF_REASONS.intersection(why)}
         for h in spoof_flagged - self._prev_flagged:
-            self.flag_log.append({"ts": now, "hex": h, "reasons": flags[h]})
+            self.flag_log.append({"ts": now, "hex": h, "reasons": flags[h], "epoch": self.epoch})
         self._prev_flagged = spoof_flagged
         for cell, n_flagged in spoofing.spoofed_cells(flags, recs, cfg).items():
             if n_flagged >= 1:  # spoofed_cells already applied the strong/weak rule
@@ -320,7 +325,7 @@ class Runtime:
             if c.state in ALARM_STATES and self._prev_states.get(cell) != c.state:
                 self.detections.append({"ts": now, "h3": cell, "state": c.state, "n_bad": c.n_bad,
                                         "n_aircraft": c.n_aircraft, "n_injected": c.n_injected,
-                                        "injected": c.injected, "mixed": c.mixed})
+                                        "injected": c.injected, "mixed": c.mixed, "epoch": self.epoch})
         self._prev_states = {cell: c.state for cell, c in cells.items()}
 
         latest = self.latest_aircraft()

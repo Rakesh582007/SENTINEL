@@ -248,7 +248,7 @@ def evaluation(request: Request):
     rt = rt_of(request)
     coverage = {a.id: a.max_aircraft_inside for a in rt.injector.attacks.values()}
     try:
-        return evaluate(rt.injector.ground_truth, rt.detections, get_detection(), rt.clock.now(), coverage, rt.flag_log)
+        return evaluate(rt.injector.ground_truth, rt.detections, get_detection(), rt.clock.now(), coverage, rt.flag_log, rt.epoch)
     except NotImplementedError as e:
         raise HTTPException(501, {"error": str(e), "ground_truth": rt.injector.ground_truth, "detections": rt.detections}) from e
 
