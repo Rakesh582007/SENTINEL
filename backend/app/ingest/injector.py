@@ -232,12 +232,22 @@ class Injector:
             return 0
         return count_inside(a.center, a.radius_km, latest)
 
+    def record_coverage(self, a: Attack, n_inside: int) -> None:
+        """Keep the most aircraft seen inside on the attack AND on its open ground-truth event,
+        so evaluation can still tell 'missed' from 'undetectable' after the attack is deleted."""
+        a.max_aircraft_inside = max(a.max_aircraft_inside, n_inside)
+        for g in reversed(self.ground_truth):
+            if g["attack_id"] == a.id and g["end_ts"] is None:
+                g["max_aircraft_inside"] = max(g.get("max_aircraft_inside", 0), n_inside)
+                return
+
     def _open_event(self, a: Attack, now: float) -> None:
         self.ground_truth.append({
             "attack_id": a.id, "kind": a.kind, "start_ts": now, "end_ts": None,
             "center": a.center, "radius_km": a.radius_km, "strength": a.strength,
             "position_loss": a.position_loss, "hex": a.hex, "offset_km": a.offset_km,
             "bearing_deg": a.bearing_deg, "alt_offset_ft": a.alt_offset_ft,
+            "max_aircraft_inside": 0,
         })
 
     def _refresh_event(self, a: Attack) -> None:

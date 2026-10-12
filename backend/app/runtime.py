@@ -221,8 +221,20 @@ class Runtime:
             extra = {}
         else:
             raise ValueError(f"unknown attack kind {body.get('kind')!r}")
+        self.refresh_coverage(a)
         self.persist_ground_truth()
         return {"attack_id": a.id, "attack": a.to_dict(now), **extra}
+
+    def update_attack(self, attack_id: str, changes: dict):
+        """A slider move (PATCH): update, refresh the coverage of a new/moved event, persist."""
+        a = self.injector.update(attack_id, changes, self.clock.now())
+        self.refresh_coverage(a)
+        self.persist_ground_truth()
+        return a
+
+    def refresh_coverage(self, a) -> None:
+        if a.kind == "jamming" and a.live(self.clock.now()):
+            self.injector.record_coverage(a, self.injector.aircraft_inside(a, self.latest_aircraft().values()))
 
     def list_scenarios(self) -> list[dict]:
         out = []
@@ -319,7 +331,7 @@ class Runtime:
         self.incidents.update(cells, recs, cfg, now, flags)
 
         for a in self.injector.live_attacks(now):
-            a.max_aircraft_inside = max(a.max_aircraft_inside, self.injector.aircraft_inside(a, latest.values()))
+            self.injector.record_coverage(a, self.injector.aircraft_inside(a, latest.values()))
 
         aircraft = []
         for r in latest.values():

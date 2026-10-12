@@ -190,10 +190,9 @@ async def patch_attack(attack_id: str, body: AttackPatch, request: Request):
     if attack_id not in rt.injector.attacks:
         raise HTTPException(404, f"no attack {attack_id}")
     try:
-        a = rt.injector.update(attack_id, body.model_dump(exclude_unset=True), rt.clock.now())
+        a = rt.update_attack(attack_id, body.model_dump(exclude_unset=True))
     except ValueError as e:
         raise HTTPException(422, str(e)) from e
-    rt.persist_ground_truth()
     return a.to_dict(rt.clock.now())
 
 

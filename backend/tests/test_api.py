@@ -332,6 +332,24 @@ def test_startup_fails_clearly_when_replay_files_are_unknown(monkeypatch):
             pass
 
 
+def outcomes(client):
+    return [(e["attack_id"], e["outcome"], e["max_aircraft_inside"]) for e in client.get("/api/evaluation").json()["per_event"]]
+
+
+def test_missed_jammer_stays_missed_after_delete(client):
+    """Audit S5: deleting an attack used to turn 'missed' into 'undetectable'."""
+    rt = seed(client, 20)
+    body = {"kind": "jamming", "center": [31.7, 74.9], "radius_km": 150, "strength": 0.0}  # covers 20 aircraft, affects none
+    first = client.post("/api/attacks", json=body).json()["attack_id"]
+    second = client.post("/api/attacks", json=body).json()["attack_id"]
+    rt.compute_tick()
+    rt.clock.set(POLL_TS + 400)  # past eval_detect_within_s (300 s)
+    assert outcomes(client) == [(first, "missed", 20), (second, "missed", 20)]
+    client.delete(f"/api/attacks/{first}")
+    client.delete("/api/attacks")
+    assert outcomes(client) == [(first, "missed", 20), (second, "missed", 20)]
+
+
 def test_unknown_ids_are_404_not_500(client):
     assert client.patch("/api/attacks/jam-999", json={"strength": 0.5}).status_code == 404
     assert client.delete("/api/attacks/jam-999").status_code == 404

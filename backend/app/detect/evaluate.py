@@ -61,17 +61,21 @@ def evaluate(ground_truth: list[dict], detections: list[dict], cfg: DetectionCon
             for i, d in enumerate(detections):  # the purple cell it caused is explained too
                 if d["state"] == "spoofing" and start - SLACK_S <= d["ts"] <= window_end:
                     used.add(i)
+        # Coverage is stored on the event (survives DELETE); `coverage` is the fallback for older events.
+        inside = ev.get("max_aircraft_inside")
+        if inside is None:
+            inside = coverage.get(ev["attack_id"])
         if hit is not None:
             outcome, ttd = "detected", max(0.0, hit["ts"] - start)
         elif now < window_end:
             outcome, ttd = "pending", None
-        elif ev["kind"] == "jamming" and coverage.get(ev["attack_id"], 0) < cfg.min_aircraft:
+        elif ev["kind"] == "jamming" and (inside or 0) < cfg.min_aircraft:
             outcome, ttd = "undetectable", None
         else:
             outcome, ttd = "missed", None
         per_event.append({"attack_id": ev["attack_id"], "kind": ev["kind"], "start_ts": start, "end_ts": ev["end_ts"],
                           "outcome": outcome, "time_to_detect_s": None if ttd is None else round(ttd, 1),
-                          "max_aircraft_inside": coverage.get(ev["attack_id"])})
+                          "max_aircraft_inside": inside})
 
     counts = {k: sum(1 for e in per_event if e["outcome"] == k) for k in ("detected", "missed", "undetectable", "pending")}
     unexplained = [d for i, d in enumerate(detections) if i not in used]
