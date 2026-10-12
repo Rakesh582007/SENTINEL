@@ -118,10 +118,12 @@ function AiSummary({ h3 }) {
       ) : null}
       {state.phase === 'not-built' ? (
         <div className="mt-2 rounded-md border border-dashed border-air-500 bg-sand-50 p-2.5 text-[13.5px] leading-snug text-ink-700">
-          <p className="font-semibold text-ink-900">Not connected yet.</p>
+          <p className="font-semibold text-ink-900">No summary available.</p>
           <p className="mt-1">
-            {STANDALONE ? 'This standalone build has no backend. ' : ''}The backend endpoint <code className="font-data text-[12px]">GET /api/cells/{'{h3}'}/summary</code> is still to be
-            built. When it exists, the note appears here, written from this area&apos;s facts, aircraft and linked incident.
+            {STANDALONE
+              ? 'This standalone build has no backend, so it cannot write summaries. '
+              : 'The backend does not know this hexagon any more (the picture moved on), or has no summary service. '}
+            Pick the hexagon again, or try again in a few seconds.
           </p>
         </div>
       ) : null}
@@ -130,7 +132,8 @@ function AiSummary({ h3 }) {
         <div className="mt-2">
           <p className="whitespace-pre-line text-[14.5px] leading-relaxed text-ink-900">{state.res?.summary || 'The backend returned an empty summary.'}</p>
           <p className="mt-1.5 text-[12px] text-ink-600">
-            Written{state.res?.generated_ts ? ` at ${istHM(state.res.generated_ts)} IST` : ''} from the facts above. Check before sharing.
+            {state.res?.label || 'Summary'}
+            {state.res?.generated_ts ? `, written at ${istHM(state.res.generated_ts)} IST` : ''}, from the facts above. Check before sharing.
           </p>
         </div>
       ) : null}

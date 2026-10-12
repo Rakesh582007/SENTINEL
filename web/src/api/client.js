@@ -86,7 +86,7 @@ export const api = {
   sentinelLatest: () => request('GET', '/sentinel/latest'),
   sentinelHistory: (device = 'sentinel-1', minutes = 5) => request('GET', `/sentinel/history?${q({ id: device, minutes })}`),
 
-  // Not built yet on the backend (planned: Gemini drafts a summary from the cell's facts).
+  // {id, summary, source: 'ai'|'template', model, label, generated_ts, cached, facts}; 404 when the hexagon is gone.
   cellSummary: (h3) => request('GET', `/cells/${id(h3)}/summary`),
 }
 

@@ -23,14 +23,15 @@ npm run dev:standalone      # same UI, backend copied into the browser
 npm run build:standalone    # one self-contained file: dist-standalone/index.html
 ```
 
-Standalone mode replays the bundled real sample (`data/sample`, 11 Oct 12:21–12:39 IST) through a JavaScript copy of the detectors in `src/standalone/` (same thresholds, same tick shape), with simulated attacks and a simulated Ground Sentinel. A permanent banner says so. No PDF reports, no live data, no AI summary. Use it for UI work and as a backup recording aid, never as the judged demo. Regenerate the sample after changing the normalizer: `python web/scripts/export_sample.py`.
+Standalone mode replays the bundled real sample (`data/sample`, 11 Oct 12:21–12:39 IST) through a JavaScript copy of the detectors in `src/standalone/` (same thresholds, same tick shape), with simulated attacks and a simulated Ground Sentinel. No PDF reports, no live data, no AI summary. Use it for UI work and as a backup recording aid, never as the judged demo. Regenerate the sample after changing the normalizer: `python web/scripts/export_sample.py`.
 
 ## Where things are
 
 | Screen | Code |
 |---|---|
 | Intro (plane on final approach, "Enter dashboard") | `src/components/Splash.jsx` |
-| Top bar: tabs, Replay/Live (confirms first), IST data clock, connection, Evaluation | `src/components/TopBar.jsx` |
+| Top bar: SENTINEL wordmark (back to main dashboard), tabs, IST data clock, connection, Evaluation, Log out | `src/components/TopBar.jsx` |
+| Main dashboard (three section boxes) | `src/components/HomeView.jsx` |
 | Map: outline basemap (works offline, India's official boundary), hexagons, aircraft, paths, circles | `src/components/map/*` |
 | Live airspace panel: early warnings, incidents + PDF, hexagon detail + AI summary | `src/components/panels/*` |
 | Attack simulator: jammer place/drag/preview, spoofing, active attacks, sensitivity, scripted demo | `src/components/simulator/*` |
@@ -46,17 +47,11 @@ Standalone mode replays the bundled real sample (`data/sample`, 11 Oct 12:21–1
 - Use **Reset all** between runs, and switch mode once before the evaluation slide so the numbers start clean (each replay loop reopens live attacks as new events).
 - The basemap is our own outline (Natural Earth, India point of view). "Streets" tiles need internet and draw the provider's boundaries; keep them off for the judged demo.
 
-## AI summary (backend still to build)
+## Summary (hexagon detail)
 
-The hexagon detail calls `GET /api/cells/{h3}/summary` and shows "Not connected yet" on 404/405/501. Expected answer:
+The hexagon detail calls `GET /api/cells/{h3}/summary` (built, backend D22) and shows `summary`, `label` and `generated_ts`. The backend uses Gemini when `GEMINI_API_KEY` is in `backend/.env` and a template sentence otherwise (`source: "ai" | "template"`). 404 means the hexagon is no longer in the current tick. `GET /api/incidents/{id}/summary` exists too and is not used by the UI yet. The standalone build has no summaries.
 
-```json
-{ "h3": "833da1fffffffff", "summary": "Plain-English note…", "model": "gemini-…", "generated_ts": 1791707467.5 }
-```
-
-Give the model only the facts the UI already shows (cell stats, reasons, aircraft, linked incident), tell it never to name a cause or a country, and fall back to a template sentence when the API is unreachable (venue Wi-Fi). Detection itself stays rule-based.
-
-## Backend gaps found while building (for the backend chat)
+## Backend gaps found while building (status checked 12 Oct: several were addressed by D19-D22 on `main`; re-test before relying on this list)
 
 1. Purple (spoof) hexagons report `n_injected: 0`, and their early warnings `injected: false`, because `n_injected` only counts jamming-style bad aircraft. The UI works around it (a hexagon is injected if a spoofed aircraft with an attack id is inside it).
 2. `compute_tick` overwrites a jammed hexagon with `spoofing` when a spoofed aircraft is in it, so that jammer logs no "entered jammed" detection while the spoof lasts.
