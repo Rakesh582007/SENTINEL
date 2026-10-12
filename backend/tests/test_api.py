@@ -5,6 +5,7 @@ import time
 import pytest
 from fastapi.testclient import TestClient
 
+from app.config import reset_detection
 from app.ingest.poller import LivePoller
 from app.ingest.recording import append_line, make_line
 from app.ingest.replay import Replayer
@@ -18,6 +19,7 @@ def client():
         rt = c.app.state.rt
         rt.reset_experiment()
         rt.clock.use_replay(POLL_TS)
+        reset_detection()  # a test that moved a slider must not leak into the next one
         yield c
 
 
@@ -57,6 +59,17 @@ def test_detection_sliders_validate(client):
     assert client.patch("/api/config/detection", json={"nacp_bad": 6}).json()["nacp_bad"] == 6
     assert client.patch("/api/config/detection", json={"nacp_bad": 20}).status_code == 422
     assert client.delete("/api/config/detection").json()["nacp_bad"] == 7
+
+
+def test_detection_config_rejects_values_that_would_crash_the_tick(client):
+    assert client.patch("/api/config/detection", json={"warn_step_s": 0}).status_code == 422  # range() step 0
+    assert client.patch("/api/config/detection", json={"jammer_radius_pct": 150}).status_code == 422  # IndexError
+    for bad in ({"warn_horizon_s": 10**7}, {"incident_close_s": -1}, {"jump_speed_kt": -5}, {"alt_min_peers": 0},
+                {"cluster_min_aircraft": 0}, {"warn_step_s": 600, "warn_horizon_s": 300}):
+        assert client.patch("/api/config/detection", json=bad).status_code == 422, bad
+    assert client.patch("/api/config/detection", content='{"jam_lower_bound": NaN}', headers=JSON).status_code == 422
+    cfg = client.get("/api/config/detection").json()
+    assert (cfg["warn_step_s"], cfg["jammer_radius_pct"]) == (30, 80.0)  # nothing was applied
 
 
 def test_jammer_lifecycle_turns_cell_red_then_reset_clears_it(client):

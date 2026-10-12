@@ -4,10 +4,10 @@
 from __future__ import annotations
 
 import calendar
-import json
 import time
 
 from fastapi import APIRouter, HTTPException, Request
+from fastapi.exceptions import RequestValidationError
 from fastapi.responses import Response
 from pydantic import ValidationError
 
@@ -150,7 +150,7 @@ def patch_detection_config(changes: dict):
     try:
         return update_detection(changes).model_dump()
     except ValidationError as e:
-        raise HTTPException(422, json.loads(e.json(include_url=False))) from e
+        raise RequestValidationError(e.errors(include_url=False)) from e  # 422 via main.validation_error
 
 
 @router.delete("/config/detection")

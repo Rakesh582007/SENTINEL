@@ -12,7 +12,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from app.regions import DEFAULT_REGION
@@ -60,9 +60,13 @@ class Settings(BaseSettings):
 
 
 class DetectionConfig(BaseModel):
-    """Thresholds from HANDOVER §6. Ranges match the Attack Simulator sliders (§7.1)."""
+    """Thresholds from HANDOVER §6. Ranges match the Attack Simulator sliders (§7.1).
 
-    model_config = ConfigDict(validate_assignment=True, extra="forbid")
+    Every field has bounds, so PATCH /api/config/detection answers 422 instead of
+    letting a value crash the tick (e.g. warn_step_s=0 or jammer_radius_pct=150).
+    """
+
+    model_config = ConfigDict(validate_assignment=True, extra="forbid", allow_inf_nan=False)
 
     # §6.1 jamming, per H3 cell
     h3_res: int = Field(3, ge=2, le=4)  # 3 ~ 12,400 km2 cells; 2 for sparse regions; 4 for zoomed views
@@ -73,38 +77,44 @@ class DetectionConfig(BaseModel):
     jam_min_bad: int = Field(2, ge=1, le=10)
     jam_lower_bound: float = Field(0.15, ge=0.0, le=1.0)  # Wilson 95% lower bound on the bad share
     degraded_frac: float = Field(0.10, ge=0.0, le=1.0)
-    pos_loss_seen_max_s: float = 10.0  # still hearing the aircraft...
-    pos_loss_seen_pos_min_s: float = 60.0  # ...but no position for this long
+    pos_loss_seen_max_s: float = Field(10.0, ge=1.0, le=120.0)  # still hearing the aircraft...
+    pos_loss_seen_pos_min_s: float = Field(60.0, ge=10.0, le=600.0)  # ...but no position for this long
     gps_sourced_only: bool = True  # ignore MLAT/TIS-B/Mode-S positions for GPS-integrity checks
 
     # §6.2 spoofing, per aircraft
-    jump_speed_kt: float = 1000.0
-    jump_min_km: float = 5.0
-    jump_min_dt_s: float = 5.0  # two sources can report the same aircraft ~1 s apart; ignore such pairs
-    alt_peer_radius_km: float = 300.0
-    alt_peer_window_s: int = 600
-    alt_min_peers: int = 4
-    alt_abs_ft: float = 1000.0
-    alt_mad_k: float = 4.0
-    cluster_radius_km: float = 1.0
-    cluster_min_aircraft: int = 3
-    cluster_dt_s: float = 10.0
-    cluster_alt_spread_ft: float = 3000.0
-    track_mismatch_deg: float = 60.0
-    track_mismatch_min_gs_kt: float = 150.0
+    jump_speed_kt: float = Field(1000.0, ge=500.0, le=5000.0)
+    jump_min_km: float = Field(5.0, ge=0.5, le=100.0)
+    jump_min_dt_s: float = Field(5.0, ge=0.0, le=60.0)  # two sources can report the same aircraft ~1 s apart; ignore such pairs
+    alt_peer_radius_km: float = Field(300.0, ge=10.0, le=1000.0)
+    alt_peer_window_s: int = Field(600, ge=60, le=1800)
+    alt_min_peers: int = Field(4, ge=2, le=50)
+    alt_abs_ft: float = Field(1000.0, ge=100.0, le=10000.0)
+    alt_mad_k: float = Field(4.0, ge=1.0, le=20.0)
+    cluster_radius_km: float = Field(1.0, ge=0.1, le=20.0)
+    cluster_min_aircraft: int = Field(3, ge=2, le=20)
+    cluster_dt_s: float = Field(10.0, ge=1.0, le=120.0)
+    cluster_alt_spread_ft: float = Field(3000.0, ge=500.0, le=40000.0)
+    track_mismatch_deg: float = Field(60.0, ge=10.0, le=180.0)
+    track_mismatch_min_gs_kt: float = Field(150.0, ge=0.0, le=600.0)
     spoof_cell_min_flags: int = Field(2, ge=1, le=5)  # weak-evidence aircraft needed before a cell turns purple
 
     # §6.3 early warning
-    warn_horizon_s: int = 900
-    warn_step_s: int = 30
+    warn_horizon_s: int = Field(900, ge=60, le=3600)
+    warn_step_s: int = Field(30, ge=5, le=300)
 
     # §6.4 incidents
-    incident_close_s: int = 600
-    jammer_radius_pct: float = 80.0
-    jammer_min_radius_km: float = 15.0
+    incident_close_s: int = Field(600, ge=30, le=7200)
+    jammer_radius_pct: float = Field(80.0, ge=1.0, le=100.0)
+    jammer_min_radius_km: float = Field(15.0, ge=1.0, le=500.0)
 
     # §6.5 evaluation
-    eval_detect_within_s: int = 300
+    eval_detect_within_s: int = Field(300, ge=30, le=3600)
+
+    @model_validator(mode="after")
+    def _step_within_horizon(self) -> DetectionConfig:
+        if self.warn_step_s > self.warn_horizon_s:
+            raise ValueError("warn_step_s must not exceed warn_horizon_s")
+        return self
 
 
 settings = Settings()
