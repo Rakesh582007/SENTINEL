@@ -6,8 +6,8 @@ from app.detect.incidents import IncidentTracker
 from app.detect.jamming import classify_cells
 from app.detect.warning import early_warnings
 from app.ingest.injector import Injector
-from app.report.pdf import incident_pdf
-from conftest import make
+from app.report.pdf import incident_pdf, latlon_text, summary_text
+from conftest import make, pdf_text
 
 CFG = DetectionConfig()
 JAM = (31.6, 74.9)
@@ -51,6 +51,22 @@ def test_pdf_renders():
     tr.update(classify_cells(recs, CFG), recs, CFG, now=1000)
     pdf = incident_pdf(tr.get(tr.summary()[0]["id"]))
     assert pdf[:4] == b"%PDF" and len(pdf) > 2000
+
+
+def test_pdf_summary_is_worded_by_aircraft_count_and_hemispheres_follow_the_signs():
+    """Audit N9."""
+    base = {"id": "inc-x", "kind": "spoofing", "opened_ts": 1000.0, "closed_ts": None, "cells": [CELL],
+            "est_lat": None, "est_lon": None, "est_radius_km": None, "max_frac_bad": 0.0}
+    one = summary_text({**base, "n_aircraft": 1})
+    assert "a single aircraft" in one and "several independent" not in one and "area above" not in one
+    assert "3 aircraft" in summary_text({**base, "n_aircraft": 3}) and "several independent" in summary_text({**base, "n_aircraft": 3})
+    assert "no individual aircraft" in summary_text({**base, "n_aircraft": 0})
+    assert "area above" in summary_text({**base, "kind": "jamming", "n_aircraft": 3, "est_lat": 31.6, "est_lon": 74.9})
+    assert latlon_text(31.6, 74.9) == "31.600 N, 74.900 E"
+    assert latlon_text(-33.87, -70.65) == "33.870 S, 70.650 W"
+    pdf = incident_pdf({**base, "n_aircraft": 1, "aircraft": [{"hex": "abc123", "flight": "X1", "first_bad_ts": 1000.0,
+                                                               "reason": "impossible_jump", "alt_baro": 30000, "injected": None}]})
+    assert "a single aircraft" in pdf_text(pdf)
 
 
 def test_evaluation_counts_detected_undetectable_and_unexplained():

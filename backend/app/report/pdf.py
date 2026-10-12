@@ -28,6 +28,32 @@ def ist(ts: float | None, fmt: str = "%d %b %Y %H:%M:%S") -> str:
     return "ongoing" if ts is None else time.strftime(fmt, time.gmtime(ts + IST_OFFSET_S)) + " IST"
 
 
+def latlon_text(lat: float, lon: float) -> str:
+    """'31.600 N, 74.900 E'; hemispheres from the signs."""
+    return f"{abs(lat):.3f} {'N' if lat >= 0 else 'S'}, {abs(lon):.3f} {'E' if lon >= 0 else 'W'}"
+
+
+def summary_text(incident: dict) -> str:
+    """The report's summary paragraph, worded by how many aircraft are involved."""
+    n = incident.get("n_aircraft", 0)
+    what = ("degraded or lost GPS integrity (NIC/NACp) or lost position" if incident["kind"] == "jamming"
+            else "positions or altitudes that are physically inconsistent")
+    when = (f"Since {ist(incident['opened_ts'], '%H:%M')}" if incident["closed_ts"] is None
+            else f"Between {ist(incident['opened_ts'], '%H:%M')} and {ist(incident['closed_ts'], '%H:%M')}")
+    if n >= 2:
+        text = (f"{when}, {n} aircraft in this area reported {what}. The pattern across several independent "
+                "aircraft indicates interference in this area rather than a fault on one aircraft.")
+    elif n == 1:
+        text = (f"{when}, a single aircraft in this area reported {what}. One aircraft alone is not proof of "
+                "interference (it may be a fault on that aircraft), so treat this as a lead to check.")
+    else:
+        text = f"{when}, cells in this area were in an alarm state, but no individual aircraft details were collected."
+    if incident.get("est_lat") is not None:
+        text += (" The area above is a rough estimate from where aircraft first reported problems "
+                 "and must be confirmed by investigation.")
+    return text
+
+
 def incident_pdf(incident: dict) -> bytes:
     buf = io.BytesIO()
     injected = bool(incident.get("injected"))
@@ -60,20 +86,14 @@ def incident_pdf(incident: dict) -> bytes:
     ]
     if incident.get("est_lat") is not None:
         facts.append(["Approximate area for investigation",
-                      f"centre {incident['est_lat']:.3f} N, {incident['est_lon']:.3f} E, radius ~{incident['est_radius_km']:.0f} km"])
+                      f"centre {latlon_text(incident['est_lat'], incident['est_lon'])}, radius ~{incident['est_radius_km']:.0f} km"])
     t = Table(facts, colWidths=[62 * mm, 116 * mm])
     t.setStyle(TableStyle([("FONT", (0, 0), (-1, -1), "Helvetica", 9), ("FONT", (0, 0), (0, -1), "Helvetica-Bold", 9),
                            ("TEXTCOLOR", (0, 0), (0, -1), NAVY), ("VALIGN", (0, 0), (-1, -1), "TOP"),
                            ("LINEBELOW", (0, 0), (-1, -1), 0.25, colors.lightgrey)]))
     story += [t, Spacer(1, 5 * mm)]
 
-    when = (f"Since {ist(incident['opened_ts'], '%H:%M')}" if incident["closed_ts"] is None
-            else f"Between {ist(incident['opened_ts'], '%H:%M')} and {ist(incident['closed_ts'], '%H:%M')}")
-    summary = (f"{when}, {n} aircraft in this area "
-               f"reported {'degraded or lost GPS integrity (NIC/NACp) or lost position' if incident['kind'] == 'jamming' else 'positions or altitudes that are physically inconsistent'}. "
-               "The pattern across several independent aircraft indicates interference in this area rather than a fault on one aircraft. "
-               "The area above is a rough estimate from where aircraft first reported problems and must be confirmed by investigation.")
-    story += [Paragraph("Summary", ss["Heading3"]), Paragraph(summary, body), Spacer(1, 4 * mm)]
+    story += [Paragraph("Summary", ss["Heading3"]), Paragraph(summary_text(incident), body), Spacer(1, 4 * mm)]
 
     rows = [["Aircraft (hex)", "Flight", "First problem", "Reason", "Altitude ft"]]
     for a in incident.get("aircraft", [])[:MAX_ROWS]:
