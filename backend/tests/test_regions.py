@@ -37,3 +37,9 @@ def test_parse_points():
         parse_points("31.6,74.9")
     with pytest.raises(ValueError):
         QueryPoint("x", 31.6, 74.9, 400)
+
+
+@pytest.mark.parametrize("spec", ["31,74,inf", "31,74,nan", "nan,74,100", "31,74,abc"])
+def test_parse_points_rejects_non_finite_numbers(spec):
+    with pytest.raises(ValueError):  # "inf" used to raise OverflowError -> HTTP 500
+        parse_points(spec)

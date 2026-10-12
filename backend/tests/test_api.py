@@ -486,6 +486,7 @@ def test_unknown_ids_are_404_not_500(client):
     assert client.get("/api/incidents/inc-1/report.pdf").status_code == 404
     assert client.post("/api/replay/seek", json={"ts": 0}).status_code == 409  # not in replay mode
     assert client.post("/api/region", json={"name": "atlantis"}).status_code == 422
+    assert client.post("/api/region", json={"points": "31,74,inf"}).status_code == 422  # was 500 (OverflowError)
 
 
 def test_replay_starts_in_longest_stretch_not_in_a_gap(tmp_path, client, real_amritsar):

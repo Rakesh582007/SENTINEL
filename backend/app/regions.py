@@ -94,7 +94,10 @@ def parse_points(spec: str) -> tuple[QueryPoint, ...]:
         parts = [x.strip() for x in chunk.split(",")]
         if len(parts) != 3:
             raise ValueError(f"point {i + 1}: expected lat,lon,radius_nm but got {chunk!r}")
-        lat, lon, radius = float(parts[0]), float(parts[1]), int(float(parts[2]))
+        try:
+            lat, lon, radius = float(parts[0]), float(parts[1]), int(float(parts[2]))
+        except (ValueError, OverflowError):  # int(float("inf")) raises OverflowError, int(float("nan")) ValueError
+            raise ValueError(f"point {i + 1}: lat, lon and radius_nm must be finite numbers, got {chunk!r}") from None
         points.append(QueryPoint(f"custom{i + 1}", lat, lon, radius))
     if not points:
         raise ValueError("no points given")

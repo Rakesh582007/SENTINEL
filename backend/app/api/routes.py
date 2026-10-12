@@ -81,7 +81,7 @@ async def set_region(body: RegionIn, request: Request):
     rt = rt_of(request)
     try:
         rt.set_region(body.name, body.points)
-    except (KeyError, ValueError) as e:
+    except (KeyError, ValueError, OverflowError) as e:
         raise HTTPException(422, str(e)) from e
     return {"current": rt.region_name, "points": [p.as_dict() for p in rt.points],
             "note": "applies to live polling from the next sweep; replay plays whatever was recorded"}
