@@ -67,15 +67,17 @@ def _weak_gps(r: Record, cfg: DetectionConfig) -> bool:
     return (r.nic is not None and r.nic <= cfg.nic_bad) or (r.nac_p is not None and r.nac_p <= cfg.nacp_bad)
 
 
-def _usable(r: Record) -> bool:
-    return not r.on_ground and r.lat is not None and r.lon is not None
+def _usable(r: Record, cfg: DetectionConfig) -> bool:
+    """Airborne, with a position that (by default, decision D9) came from the aircraft's own GPS:
+    MLAT / TIS-B / ADS-R positions are computed by the ground network and jump on their own."""
+    return not r.on_ground and r.lat is not None and r.lon is not None and (r.gps_sourced or not cfg.gps_sourced_only)
 
 
-def _tracks(records: list[Record]) -> dict[str, list[Record]]:
+def _tracks(records: list[Record], cfg: DetectionConfig) -> dict[str, list[Record]]:
     """Positions per aircraft, time-ordered, exact repeats removed."""
     by_hex: dict[str, list[Record]] = defaultdict(list)
     for r in records:
-        if _usable(r):
+        if _usable(r, cfg):
             by_hex[r.hex].append(r)
     for hex_id, rs in by_hex.items():
         rs.sort(key=lambda r: r.ts)
@@ -217,7 +219,7 @@ def _pinned_polls(seen: list[tuple[float, float, float]], cfg: DetectionConfig) 
 
 
 def flag_aircraft(records: list[Record], cfg: DetectionConfig) -> dict[str, list[str]]:
-    tracks = _tracks(records)
+    tracks = _tracks(records, cfg)
     flags: dict[str, set] = defaultdict(set)
     _jump_and_track(tracks, cfg, flags)
     _alt_offset(tracks, cfg, flags)
@@ -232,7 +234,7 @@ def flagged_by_cell(flags: dict[str, list[str]], records: list[Record], cfg: Det
         return {}
     newest: dict[str, Record] = {}
     for r in records:
-        if r.hex in spoofed and _usable(r) and (r.hex not in newest or r.ts > newest[r.hex].ts):
+        if r.hex in spoofed and _usable(r, cfg) and (r.hex not in newest or r.ts > newest[r.hex].ts):
             newest[r.hex] = r
     out: dict[str, list[str]] = defaultdict(list)
     for r in newest.values():

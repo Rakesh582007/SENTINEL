@@ -15,6 +15,14 @@ def test_normal_flight_is_clean():
     assert flag_aircraft(track("aaaaaa"), CFG) == {}
 
 
+def test_mlat_positions_are_not_spoofing_evidence():
+    """Audit N6 / decision D9: MLAT positions jump on their own; they are not the aircraft's GPS."""
+    rs = track("mmmmmm", src_type="mlat")
+    rs[3].lat += 0.25
+    assert flag_aircraft(rs, CFG) == {}
+    assert "impossible_jump" in flag_aircraft(rs, CFG.model_copy(update={"gps_sourced_only": False}))["mmmmmm"]
+
+
 def test_jump_with_good_gps_is_spoofing():
     rs = track("aaaaaa")
     rs[3].lat += 0.25  # ~28 km jump inside one poll
