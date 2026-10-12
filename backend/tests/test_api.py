@@ -138,6 +138,14 @@ def test_sentinel_post_and_latest(client):
     assert store.latest(time.time() + 60)[0]["status"] == "OFFLINE"
 
 
+def test_sentinel_rejects_nan_and_latest_keeps_working(client):
+    """Audit N4: a NaN was stored and GET /api/sentinel/latest then answered 500."""
+    r = client.post("/api/sentinel", content='{"id": "s-nan", "fix": true, "avg_snr": NaN}', headers=JSON)
+    assert r.status_code == 422
+    assert client.post("/api/sentinel", content='{"id": "s-inf", "fix": true, "hdop": Infinity}', headers=JSON).status_code == 422
+    assert client.get("/api/sentinel/latest").status_code == 200
+
+
 def test_websocket_sends_latest_tick_on_connect(client):
     seed(client)
     client.app.state.rt.compute_tick()

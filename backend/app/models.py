@@ -75,9 +75,10 @@ class AttackPatch(BaseModel):
 
 
 class SentinelIn(BaseModel):
-    """What the ESP32 posts (HANDOVER §9.1). Extra fields are kept as-is."""
+    """What the ESP32 posts (HANDOVER §9.1). Extra fields are kept as-is.
+    NaN/inf are rejected: a stored NaN made GET /api/sentinel/latest fail (500)."""
 
-    model_config = ConfigDict(extra="allow")
+    model_config = ConfigDict(extra="allow", allow_inf_nan=False)
     id: str = "sentinel-1"
     ts: float | None = None  # device millis since boot; the server stamps recv_ts itself
     lat: float | None = None
