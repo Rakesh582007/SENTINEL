@@ -22,7 +22,8 @@ function styleFor(state, selected) {
     styleCache.set(key, {
       color: selected ? '#143E73' : s.color,
       weight: selected ? 3.5 : alarm ? 2.2 : state === 'degraded' ? 1.8 : 1,
-      opacity: state === 'insufficient' && !selected ? 0.55 : 0.95,
+      // Clear hexagons are background: thin and faint, so the eye goes to amber, red and purple.
+      opacity: state === 'insufficient' && !selected ? 0.55 : state === 'clear' && !selected ? 0.45 : 0.95,
       dashArray: state === 'insufficient' && !selected ? '4 4' : null,
       fillColor: s.color,
       fillOpacity: s.fill,
@@ -64,7 +65,7 @@ const CellPolygon = memo(function CellPolygon({ cell, selected, onPick }) {
 const labelCache = new Map()
 function labelIcon(cell, injected) {
   const s = stateOf(cell.state)
-  const count = cell.state === 'spoofing' ? '' : ` ${cell.n_bad}/${cell.n_aircraft}`
+  const count = cell.state === 'spoofing' ? '' : ` · ${cell.n_bad}/${cell.n_aircraft}`
   const key = `${cell.state}|${count}|${injected}`
   if (!labelCache.has(key)) {
     labelCache.set(
@@ -85,7 +86,7 @@ const PRIORITY = { jammed: 3, spoofing: 3, degraded: 1 }
 
 /** Word labels on hexagons that need attention. Labels that would overlap a more
  *  important one are dropped until you zoom in (the tooltip still names the state). */
-function CellLabels({ cells, injectedCells }) {
+function CellLabels({ cells, injectedCells, incidentsByCell }) {
   const map = useMap()
   const [zoom, setZoom] = useState(map.getZoom())
   useMapEvents({ zoomend: () => setZoom(map.getZoom()) })
@@ -94,11 +95,15 @@ function CellLabels({ cells, injectedCells }) {
     const boxes = []
     const keep = []
     const ranked = cells
-      .filter((c) => PRIORITY[c.state])
+      // Degraded (amber) hexagons only get a word label once zoomed in; the fill and the
+      // tooltip already say it, and at country zoom their labels buried the red ones.
+      .filter((c) => PRIORITY[c.state] >= 3 || (PRIORITY[c.state] && zoom >= 8))
+      // A hexagon inside an open incident is named by the incident's chip until you zoom in.
+      .filter((c) => zoom >= 8 || !incidentsByCell.get(c.id)?.open)
       .sort((a, b) => PRIORITY[b.state] - PRIORITY[a.state] || b.n_bad - a.n_bad || b.n_aircraft - a.n_aircraft)
     for (const c of ranked) {
       const p = map.latLngToLayerPoint(c.center)
-      const text = c.state === 'spoofing' ? 8 : 8 + String(c.n_bad).length + String(c.n_aircraft).length + 2
+      const text = c.state === 'spoofing' ? 8 : 8 + String(c.n_bad).length + String(c.n_aircraft).length + 4
       const w = text * 7.4 + 12 + (injectedCells.has(c.id) ? 62 : 0)
       const box = { x0: p.x - w / 2 - 3, x1: p.x + w / 2 + 3, y0: p.y - 11, y1: p.y + 11 }
       if (boxes.some((b) => box.x0 < b.x1 && box.x1 > b.x0 && box.y0 < b.y1 && box.y1 > b.y0)) continue
@@ -108,7 +113,7 @@ function CellLabels({ cells, injectedCells }) {
     return keep
     // zoom is a dependency because layer points change with it
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [cells, injectedCells, map, zoom])
+  }, [cells, injectedCells, incidentsByCell, map, zoom])
 
   return (
     <Pane name="cell-labels" style={{ zIndex: 620 }}>
@@ -138,7 +143,7 @@ export default function CellsLayer({ onCellClick }) {
           <CellPolygon key={c.id} cell={c} selected={c.id === selectedId} onPick={onCellClick} />
         ))}
       </Pane>
-      <CellLabels cells={cells} injectedCells={d.injectedCells} />
+      <CellLabels cells={cells} injectedCells={d.injectedCells} incidentsByCell={d.incidentsByCell} />
     </>
   )
 }

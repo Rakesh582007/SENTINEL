@@ -256,6 +256,52 @@ body {
   height: 26px;
   display: block;
 }
+/* Country zoom: smaller planes so the Delhi stack doesn't become one blob. */
+.ac-icon.small {
+  width: 18px;
+  height: 18px;
+}
+.ac-icon.small svg {
+  width: 18px;
+  height: 18px;
+}
+/* Healthy aircraft step back so flagged ones (rings) stand out. */
+.ac-icon.quiet {
+  opacity: 0.62;
+}
+/* Incident marker on the map: a small chip instead of a paragraph. Click = replay it. */
+.zone-chip {
+  position: absolute;
+  left: 0;
+  top: 0;
+  transform: translate(-50%, -50%);
+  white-space: nowrap;
+  border-radius: 999px;
+  padding: 1px 8px 2px;
+  font: 700 12px/1.4 Mukta, system-ui, sans-serif;
+  color: #fff;
+  background: #b5292e;
+  box-shadow: 0 1px 3px rgba(20, 30, 50, 0.35);
+  cursor: pointer;
+}
+.zone-chip.spoof {
+  background: #7b45c4;
+}
+.zone-chip.inj {
+  box-shadow: 0 0 0 2px var(--signal), 0 1px 3px rgba(20, 30, 50, 0.35);
+}
+.zone-chip .inj {
+  margin-left: 4px;
+  border-radius: 3px;
+  padding: 0 4px;
+  font-size: 10.5px;
+  background: var(--signal);
+  color: #2b1003;
+}
+.zone-chip.active {
+  outline: 3px solid #143e73;
+  outline-offset: 1px;
+}
 .ac-icon .inj-tag {
   position: absolute;
   left: 22px;
@@ -289,10 +335,11 @@ body {
   position: absolute;
   left: 0;
   top: 0;
-  transform: translate(-7px, -7px);
+  transform: translate(-5px, -5px);
   white-space: nowrap;
-  color: #184b8c;
-  font: 400 10.5px/1.1 B612, Consolas, monospace;
+  color: #3d5f8f;
+  font: 600 11px/1.1 Mukta, system-ui, sans-serif;
+  text-shadow: 0 0 2px #f4eee0, 0 0 2px #f4eee0, 0 0 3px #f4eee0;
 }
 .apt svg {
   display: inline-block;

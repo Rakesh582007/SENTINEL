@@ -42,10 +42,11 @@ KIND_OF_STATE = {"jammed": "jamming", "spoofing": "spoofing"}
 
 
 class IncidentTracker:
-    def __init__(self, db=None, run_id: str | None = None) -> None:
+    def __init__(self, db=None, run_id: str | None = None, prefix: str = "inc") -> None:
         self.db = db  # a db.DbWriter, or None (tests): writes are queued, never run in the tick
-        # ids carry the process run id, so a restart never overwrites the last run's rows in SQLite
-        self.id_prefix = f"inc-{run_id}-" if run_id else "inc-"
+        # ids carry the process run id, so a restart never overwrites the last run's rows in SQLite.
+        # prefix: "inc" = the Attack Simulator view (real + injected), "air" = Live airspace (real only).
+        self.id_prefix = f"{prefix}-{run_id}-" if run_id else f"{prefix}-"
         self._incidents: dict[str, dict] = {}
         self._seq = itertools.count(1)
 
@@ -57,7 +58,7 @@ class IncidentTracker:
 
         for cell, stat in alarm.items():
             kind = KIND_OF_STATE[stat.state]
-            inc = self._find_open(cell, kind)
+            inc = self._find_open(cell, kind) or self._find_replayed(cell, kind, now, cfg)
             if inc is None:
                 inc = self._open(cell, kind, now)
             if cell not in inc["cells"]:
@@ -84,6 +85,20 @@ class IncidentTracker:
         near = set(h3.grid_disk(cell, 1))
         for inc in self._incidents.values():
             if inc["closed_ts"] is None and inc["kind"] == kind and near.intersection(inc["cells"]):
+                return inc
+        return None
+
+    def _find_replayed(self, cell: str, kind: str, now: float, cfg: DetectionConfig) -> dict | None:
+        """Replay jumped back into the time span of an incident we already have (timeline click,
+        "replay this incident", or the loop): continue that incident instead of opening a copy.
+        In live mode time only moves forward, so a closed incident never matches."""
+        near = set(h3.grid_disk(cell, 1))
+        for inc in reversed(list(self._incidents.values())):
+            if inc["closed_ts"] is None or inc["kind"] != kind or not near.intersection(inc["cells"]):
+                continue
+            if inc["opened_ts"] - cfg.jam_window_s <= now <= inc["last_alarm_ts"] + cfg.incident_close_s:
+                inc["closed_ts"] = None
+                log.info("incident %s re-detected in replay", inc["id"])
                 return inc
         return None
 

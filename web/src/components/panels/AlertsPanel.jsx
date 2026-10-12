@@ -1,6 +1,6 @@
 import { stateOf } from '../../lib/states.js'
 import { clock } from '../../lib/time.js'
-import { alertInjected, useDerived, useStore } from '../../store.js'
+import { alertInjected, useDerived, useStore, useViewTick } from '../../store.js'
 import { InjectedBadge, SectionTitle } from '../ui.jsx'
 import { useDataElapsed } from './useDataClock.js'
 
@@ -83,7 +83,7 @@ function SentinelCard({ a }) {
 
 export default function AlertsPanel() {
   const d = useDerived()
-  const tick = useStore((s) => s.tick)
+  const tick = useViewTick()
   const setTab = useStore((s) => s.setTab)
   const elapsed = useDataElapsed()
   const alerts = d.alerts

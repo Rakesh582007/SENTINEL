@@ -556,6 +556,7 @@ export class Engine {
     this.window = new Window(WINDOW_KEEP_S)
     this.injector = new Injector()
     this.incidents = new IncidentTracker()
+    this.realIncidents = new IncidentTracker('air') // Live airspace: real records only
     this.sentinel = new SentinelStore()
     this.box = new FakeBox(this.sentinel)
     this.mode = 'replay'
@@ -609,6 +610,7 @@ export class Engine {
   clearForTimeJump() {
     this.window.clear()
     this.incidents.reset()
+    this.realIncidents.reset()
     this.prevStates.clear()
     this.prevFlagged.clear()
     this.scenario = null
@@ -668,6 +670,7 @@ export class Engine {
     this.window.clear()
     this.injector.clearAll()
     this.incidents.reset()
+    this.realIncidents.reset()
     this.detections = []
     this.flagLog = []
     this.prevStates.clear()
@@ -789,6 +792,58 @@ export class Engine {
     this.incidents.update(cells, recs, cfg, now, flags)
     for (const a of this.injector.liveAttacks(now)) a.max_aircraft_inside = Math.max(a.max_aircraft_inside, this.injector.aircraftInside(a, latest.values()))
 
+    const aircraft = this.aircraftRows(latest, flags, cfg, now)
+    const stateCounts = {}
+    for (const c of cells.values()) stateCounts[c.state] = (stateCounts[c.state] || 0) + 1
+    const real = this.realView(recs, latest, cfg, now, this.sentinel.alerts(wall))
+
+    this.lastTick = {
+      type: 'tick',
+      ts: now,
+      mode: this.mode,
+      region: this.region,
+      h3_res: cfg.h3_res,
+      window_s: cfg.jam_window_s,
+      cells: toGeoJSON(cells),
+      aircraft,
+      alerts,
+      incidents_summary: this.incidents.summary(),
+      attacks: [...this.injector.attacks.values()].map((a) => a.toDict(now)),
+      sentinel: this.sentinel.latest(wall),
+      replay: this.replayStatus(),
+      scenario: this.scenarioStatus(),
+      stats: { aircraft: aircraft.length, cells: stateCounts, window_records: this.window.length },
+      credits: ATTRIBUTION,
+      standalone: true,
+      real,
+    }
+    return this.lastTick
+  }
+
+  /** Same detectors on the pristine records (simulated attacks stripped), like the backend's tick.real. */
+  realView(recs, latest, cfg, now, sentinelAlerts) {
+    const pristine = (r) => (r.injected && r.original ? r.original : r)
+    const realRecs = recs.map(pristine)
+    const realLatest = new Map([...latest].map(([h, r]) => [h, pristine(r)]))
+    const cells = classifyCells(realRecs, cfg)
+    const flags = flagAircraft(realRecs, cfg)
+    for (const [cell, n] of spoofedCells(flags, realRecs, cfg)) {
+      if (n >= 1) {
+        const c = cells.get(cell) || { h3: cell, n_aircraft: n, n_bad: 0, frac_bad: 0, lower_bound: 0, state: 'spoofing', n_injected: 0, bad_hexes: [], reasons: {} }
+        c.state = 'spoofing'
+        cells.set(cell, c)
+      }
+    }
+    const alarm = new Map([...cells].filter(([, c]) => c.state === 'jammed' || c.state === 'spoofing').map(([k, c]) => [k, c.state]))
+    const alerts = [...earlyWarnings(realLatest, alarm, cfg, now, new Set()), ...sentinelAlerts]
+    this.realIncidents.update(cells, realRecs, cfg, now, flags)
+    const aircraft = this.aircraftRows(realLatest, flags, cfg, now)
+    const stateCounts = {}
+    for (const c of cells.values()) stateCounts[c.state] = (stateCounts[c.state] || 0) + 1
+    return { cells: toGeoJSON(cells), aircraft, alerts, incidents_summary: this.realIncidents.summary(), stats: { aircraft: aircraft.length, cells: stateCounts } }
+  }
+
+  aircraftRows(latest, flags, cfg, now) {
     const aircraft = []
     for (const r of latest.values()) {
       const pos = bestPosition(r)
@@ -813,29 +868,7 @@ export class Engine {
         injected: r.injected,
       })
     }
-    const stateCounts = {}
-    for (const c of cells.values()) stateCounts[c.state] = (stateCounts[c.state] || 0) + 1
-
-    this.lastTick = {
-      type: 'tick',
-      ts: now,
-      mode: this.mode,
-      region: this.region,
-      h3_res: cfg.h3_res,
-      window_s: cfg.jam_window_s,
-      cells: toGeoJSON(cells),
-      aircraft,
-      alerts,
-      incidents_summary: this.incidents.summary(),
-      attacks: [...this.injector.attacks.values()].map((a) => a.toDict(now)),
-      sentinel: this.sentinel.latest(wall),
-      replay: this.replayStatus(),
-      scenario: this.scenarioStatus(),
-      stats: { aircraft: aircraft.length, cells: stateCounts, window_records: this.window.length },
-      credits: ATTRIBUTION,
-      standalone: true,
-    }
-    return this.lastTick
+    return aircraft
   }
   tick() {
     let payload

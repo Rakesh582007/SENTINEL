@@ -82,7 +82,8 @@ class Runtime:
         self.points: tuple[QueryPoint, ...] = get_region(settings.region)
         self.sources = list(settings.sources)
         self.run_id = new_run_id()
-        self.incidents = IncidentTracker(run_id=self.run_id)
+        self.incidents = IncidentTracker(run_id=self.run_id)  # Attack Simulator view: real + injected records
+        self.real_incidents = IncidentTracker(run_id=self.run_id, prefix="air")  # Live airspace: real records only
         self.ingest_task: asyncio.Task | None = None
         self.replayer: Replayer | None = None
         self.poller: LivePoller | None = None
@@ -102,6 +103,7 @@ class Runtime:
         self.db = None
         self.ai = Summarizer(settings)  # words only, on request; never called from the tick
         self.tick_state: dict | None = None
+        self.real_state: dict | None = None  # same shape as tick_state, for the real-only view
         self.dbw: DbWriter | None = None  # every SQLite write is queued here (see db.py)
 
     # ------------------------------------------------------------------ setup
@@ -110,6 +112,7 @@ class Runtime:
             self.db = connect(self.settings.db_path)
             self.dbw = DbWriter(self.db)
             self.incidents.db = self.dbw
+            self.real_incidents.db = self.dbw
         except Exception:  # the demo must not die because of a disk problem
             log.exception("SQLite unavailable; continuing without persistence")
             self.db = self.dbw = None
@@ -165,6 +168,7 @@ class Runtime:
         and keep the incidents (closed at the moment of the jump)."""
         self.window.clear()
         self.incidents.close_all(self.clock.now() if old_now is None else old_now)
+        self.real_incidents.close_all(self.clock.now() if old_now is None else old_now)
         self._end_alerts(set(), self.clock.now() if old_now is None else old_now)
         self.epoch += 1
         self.injector.epoch = self.epoch  # events reopened by injector.rebase() belong to the new epoch
@@ -203,6 +207,7 @@ class Runtime:
         self.window.clear()
         self.injector.clear_all()
         self.incidents.reset()
+        self.real_incidents.reset()
         self.detections.clear()
         self.flag_log.clear()
         self.alert_log.clear()
@@ -380,7 +385,68 @@ class Runtime:
             self.dbw.submit(functools.partial(insert_sentinel, entry=dict(entry)))
         return entry
 
+    def find_incident(self, incident_id: str) -> tuple[IncidentTracker | None, dict | None]:
+        """Look an incident up in either view (ids differ by prefix: inc- simulator, air- live airspace)."""
+        for tracker in (self.real_incidents, self.incidents):
+            inc = tracker.get(incident_id)
+            if inc is not None:
+                return tracker, inc
+        return None, None
+
     # ------------------------------------------------------------------ tick
+    def _aircraft_rows(self, latest: dict[str, Record], flags: dict, cfg, now: float) -> list[dict]:
+        rows = []
+        for r in latest.values():
+            pos = r.best_position()
+            if pos is None:
+                continue
+            rows.append({
+                "hex": r.hex, "flight": r.flight, "lat": round(pos[0], 5), "lon": round(pos[1], 5),
+                "pos_lost": not r.has_position, "alt_baro": r.alt_baro, "alt_geom": r.alt_geom,
+                "on_ground": r.on_ground, "gs": r.gs, "track": r.track, "nic": r.nic, "nac_p": r.nac_p,
+                "source": r.source, "age_s": round(now - r.ts, 1), "bad": bad_reason(r, cfg),
+                "spoof": flags.get(r.hex, []), "injected": r.injected,
+            })
+        return rows
+
+    @staticmethod
+    def _cells_with_spoofing(recs: list[Record], cfg) -> tuple[dict[str, CellStat], dict, dict]:
+        cells = classify_cells(recs, cfg)
+        flags = spoofing.flag_aircraft(recs, cfg)
+        for cell, n_flagged in spoofing.spoofed_cells(flags, recs, cfg).items():
+            if n_flagged >= 1:  # spoofed_cells already applied the strong/weak rule
+                c = cells.get(cell) or CellStat(h3=cell, n_aircraft=n_flagged, n_bad=0, frac_bad=0.0, lower_bound=0.0, state="spoofing")
+                c.state = "spoofing"
+                cells[cell] = c
+        flagged = spoofing.flagged_by_cell(flags, recs, cfg)
+        return cells, flags, flagged
+
+    def _real_view(self, recs: list[Record], latest: dict[str, Record], cfg, now: float, sentinel_alerts: list[dict]) -> dict:
+        """Live airspace: the same detectors on the pristine records, with every simulated attack
+        stripped out (each injected record keeps its original). Its incidents are tracked separately,
+        so a judge's jammer never shows up, or opens a report, in Live airspace."""
+        def pristine(r: Record) -> Record:
+            return r.original if r.injected and r.original is not None else r
+
+        real_recs = [pristine(r) for r in recs]
+        real_latest = {h: pristine(r) for h, r in latest.items()}
+        cells, flags, flagged = self._cells_with_spoofing(real_recs, cfg)
+        for c in cells.values():
+            label_injection(c, flagged.get(c.h3, ()), set())
+        alarm_cells = {cell: c.state for cell, c in cells.items() if c.state in ALARM_STATES}
+        alerts = warning.early_warnings(real_latest, alarm_cells, cfg, now) + sentinel_alerts
+        self.real_incidents.update(cells, real_recs, cfg, now, flags)
+        aircraft = self._aircraft_rows(real_latest, flags, cfg, now)
+        state_counts: dict[str, int] = {}
+        for c in cells.values():
+            state_counts[c.state] = state_counts.get(c.state, 0) + 1
+        self.real_state = {"ts": now, "mode": self.mode, "window_s": cfg.jam_window_s, "cells": cells, "flags": flags,
+                           "spoof_by_cell": flagged, "injected_aircraft": set(), "records": real_recs,
+                           "alerts": alerts, "incidents": self.real_incidents.summary()}
+        return {"cells": to_geojson(cells), "aircraft": aircraft, "alerts": alerts,
+                "incidents_summary": self.real_state["incidents"],
+                "stats": {"aircraft": len(aircraft), "cells": state_counts}}
+
     def compute_tick(self) -> dict:
         now = self.clock.now()
         cfg = get_detection()
@@ -388,20 +454,13 @@ class Runtime:
         self.window.prune(now)
         recs = self.window.since(now - cfg.jam_window_s, now)
 
-        cells = classify_cells(recs, cfg)
-        flags = spoofing.flag_aircraft(recs, cfg)
+        cells, flags, flagged = self._cells_with_spoofing(recs, cfg)
         spoof_flagged = {h for h, why in flags.items() if SPOOF_REASONS.intersection(why)}
         for h in spoof_flagged - self._prev_flagged:
             self.flag_log.append({"ts": now, "hex": h, "reasons": flags[h], "epoch": self.epoch})
         self._prev_flagged = spoof_flagged
-        for cell, n_flagged in spoofing.spoofed_cells(flags, recs, cfg).items():
-            if n_flagged >= 1:  # spoofed_cells already applied the strong/weak rule
-                c = cells.get(cell) or CellStat(h3=cell, n_aircraft=n_flagged, n_bad=0, frac_bad=0.0, lower_bound=0.0, state="spoofing")
-                c.state = "spoofing"
-                cells[cell] = c
         # Injected = ANY simulated effect in the cell; mixed = simulated and real ones together.
         injected_aircraft = {r.hex for r in recs if r.injected}
-        flagged = spoofing.flagged_by_cell(flags, recs, cfg)
         for cell, c in cells.items():
             label_injection(c, flagged.get(cell, ()), injected_aircraft)
 
@@ -417,25 +476,16 @@ class Runtime:
         injected_cells = {cell for cell, c in cells.items() if c.state in ALARM_STATES and c.injected}
         mixed_cells = {cell for cell, c in cells.items() if c.state in ALARM_STATES and c.mixed}
         alerts = warning.early_warnings(latest, alarm_cells, cfg, now, injected_cells, mixed_cells)
-        alerts += self.sentinel.alerts(time.time())
+        sentinel_alerts = self.sentinel.alerts(time.time())
+        alerts += sentinel_alerts
         self._log_alerts(alerts, now)
         self.incidents.update(cells, recs, cfg, now, flags)
+        real = self._real_view(recs, latest, cfg, now, sentinel_alerts)
 
         for a in self.injector.live_attacks(now):
             self.injector.record_coverage(a, self.injector.aircraft_inside(a, latest.values()))
 
-        aircraft = []
-        for r in latest.values():
-            pos = r.best_position()
-            if pos is None:
-                continue
-            aircraft.append({
-                "hex": r.hex, "flight": r.flight, "lat": round(pos[0], 5), "lon": round(pos[1], 5),
-                "pos_lost": not r.has_position, "alt_baro": r.alt_baro, "alt_geom": r.alt_geom,
-                "on_ground": r.on_ground, "gs": r.gs, "track": r.track, "nic": r.nic, "nac_p": r.nac_p,
-                "source": r.source, "age_s": round(now - r.ts, 1), "bad": bad_reason(r, cfg),
-                "spoof": flags.get(r.hex, []), "injected": r.injected,
-            })
+        aircraft = self._aircraft_rows(latest, flags, cfg, now)
 
         state_counts: dict[str, int] = {}
         for c in cells.values():
@@ -459,6 +509,9 @@ class Runtime:
             "scenario": self.scenario_status(),
             "stats": {"aircraft": len(aircraft), "cells": state_counts, "window_records": len(self.window)},
             "credits": ATTRIBUTION,
+            # Live airspace reads this block: the same detectors on real data only (no simulated attacks).
+            # Everything above is the Attack Simulator's view (real + injected).
+            "real": real,
         }
         self.last_tick = payload
         # What the AI summary (app/ai/summary.py) may describe: rule-engine output of this tick only.

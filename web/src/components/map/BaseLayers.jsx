@@ -55,8 +55,11 @@ function Tiles() {
 }
 
 const aptIcons = new Map()
+// At country zoom only these keep a name; the rest are a dot until you zoom in (Amritsar and
+// Lahore are 40 km apart and their names sat on top of each other and of the hexagon labels).
+const MAJOR = new Set(['VIDP', 'VIAR', 'VIJU', 'VISR', 'OPIS', 'VIJP', 'VILK', 'VICG', 'VILH'])
 function airportIcon(icao, city, zoom) {
-  const showCity = zoom >= 6
+  const showCity = zoom >= 7 || (zoom >= 6 && MAJOR.has(icao))
   const key = `${icao}|${showCity}`
   if (!aptIcons.has(key)) {
     aptIcons.set(
@@ -64,7 +67,7 @@ function airportIcon(icao, city, zoom) {
       L.divIcon({
         className: 'leaflet-div-icon bare',
         iconSize: [0, 0],
-        html: `<div class="apt"><svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true"><circle cx="7" cy="7" r="3.6" fill="#FBF8F1" stroke="#1E5AA8" stroke-width="1.5"/><path d="M7 0.6v2.2M7 11.2v2.2M0.6 7h2.2M11.2 7h2.2" stroke="#1E5AA8" stroke-width="1.4"/></svg><span class="name">${icao}${showCity ? ` ${city}` : ''}</span></div>`,
+        html: `<div class="apt" title="${icao} ${city}"><svg width="10" height="10" viewBox="0 0 14 14" aria-hidden="true"><circle cx="7" cy="7" r="4" fill="#FBF8F1" stroke="#1E5AA8" stroke-width="2"/></svg>${showCity ? `<span class="name">${city}</span>` : ''}</div>`,
       }),
     )
   }

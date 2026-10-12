@@ -29,7 +29,7 @@ export const STATE = {
     label: 'Clear',
     color: '#2EAF6E',
     ink: '#16613A',
-    fill: 0.22,
+    fill: 0.12,
     words: 'Aircraft here report healthy GPS.',
   },
   insufficient: {

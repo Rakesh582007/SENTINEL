@@ -1,5 +1,5 @@
 import { sentinelOf, stateOf } from '../lib/states.js'
-import { useDerived, useStore } from '../store.js'
+import { derive, useStore, viewTick } from '../store.js'
 
 function HexIcon() {
   return (
@@ -57,13 +57,14 @@ const Line = ({ dot, children }) => (
 
 /** Main dashboard: three sections to choose from, each with its state right now. */
 export default function HomeView() {
-  const tick = useStore((s) => s.tick)
-  const d = useDerived()
+  const raw = useStore((s) => s.tick)
+  const tick = viewTick(raw, 'real') // Live airspace numbers never include simulated attacks
+  const d = derive(tick)
   const counts = tick?.stats?.cells || {}
   const jammed = counts.jammed || 0
   const spoofing = counts.spoofing || 0
   const warnings = d.alerts.filter((a) => a.kind === 'early_warning').length
-  const liveAttacks = d.attacks.filter((a) => a.live).length
+  const liveAttacks = (raw?.attacks || []).filter((a) => a.live).length
   const box = tick?.sentinel?.[0]
   const s = box ? sentinelOf(box.server_status) : null
 

@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import { CELL_STATES, stateOf } from '../lib/states.js'
 import { useStore } from '../store.js'
 
@@ -34,6 +35,7 @@ export default function Legend() {
   const toggleInsufficient = useStore((s) => s.toggleInsufficient)
   const basemap = useStore((s) => s.basemap)
   const tick = useStore((s) => s.tick)
+  const [symbols, setSymbols] = useState(false)
   const credits = tick?.credits || { 'adsb.fi': 'https://adsb.fi', 'adsb.lol': 'https://adsb.lol' }
   const sources = ['adsb.fi', 'adsb.lol'].filter((k) => credits[k])
 
@@ -54,6 +56,15 @@ export default function Legend() {
           </li>
         ))}
       </ul>
+      <button
+        type="button"
+        aria-expanded={symbols}
+        onClick={() => setSymbols((v) => !v)}
+        className="rounded border border-sand-400 px-1.5 text-[12px] font-semibold text-ink-700 hover:bg-air-50"
+      >
+        {symbols ? 'Hide plane symbols' : 'Plane symbols'}
+      </button>
+      {symbols ? (
       <ul className="flex flex-wrap items-center gap-x-3 gap-y-1" aria-label="Aircraft symbols">
         <li className="flex items-center gap-1">
           <PlaneKey /> Aircraft
@@ -74,6 +85,7 @@ export default function Legend() {
           Simulated
         </li>
       </ul>
+      ) : null}
       <p className="ml-auto text-[12px] text-ink-600">
         Aircraft data:{' '}
         {sources.map((k, i) => (
@@ -84,7 +96,7 @@ export default function Legend() {
             {i < sources.length - 1 ? ', ' : ''}
           </span>
         ))}
-        . Boundaries: Natural Earth (India view)
+        . Map: Natural Earth (India view)
         {basemap === 'tiles' ? (
           <>
             . Tiles ©{' '}

@@ -31,12 +31,17 @@ export const useStore = create((set, get) => ({
   select: (kind, id) => set({ selection: kind && id ? { kind, id } : null }),
   clearSelection: () => set({ selection: null }),
 
+  // The incident being replayed (set by lib/incidents.replayIncident): drives the map banner
+  // and the highlight. {id, num, kind, opened_ts, place, bounds} | null
+  replayFocus: null,
+  setReplayFocus: (replayFocus) => set({ replayFocus }),
+
   // Ask the map to move. { center, zoom } or { bounds: [[lat, lon], [lat, lon]] }
   focus: null,
   focusOn: (target) => set({ focus: { ...target, seq: ++focusSeq } }),
 
   // ---------------------------------------------------------------- map options
-  showInsufficient: true,
+  showInsufficient: false, // grey 'too few aircraft' hexagons are noise on a projector; legend toggle shows them
   toggleInsufficient: () => set((s) => ({ showInsufficient: !s.showInsufficient })),
   basemap: 'outline', // outline | tiles
   setBasemap: (basemap) => set({ basemap }),
@@ -74,10 +79,28 @@ export const useStore = create((set, get) => ({
   setPicking: (picking) => set({ picking }),
 }))
 
+// ---------------------------------------------------------------- views
+// The backend runs the detectors twice per tick: on everything (Attack Simulator: real traffic
+// plus simulated attacks) and on real data only (tick.real). Live airspace and Home use the real
+// view, so a judge's jammer never shows up there. Fields that are not per-view (mode, replay,
+// sentinel, credits) are shared.
+const realCache = new WeakMap()
+export function viewTick(tick, view) {
+  if (!tick || view === 'sim' || !tick.real) return tick
+  let t = realCache.get(tick)
+  if (!t) {
+    t = { ...tick, ...tick.real, attacks: [], scenario: null, real: undefined, view: 'real' }
+    realCache.set(tick, t)
+  }
+  return t
+}
+export const viewOfTab = (tab) => (tab === 'simulator' ? 'sim' : 'real')
+export const useView = () => useStore((s) => viewOfTab(s.tab))
+export const useViewTick = () => viewTick(useStore((s) => s.tick), useView())
+
 // ---------------------------------------------------------------- derived data
-// Computed once per tick and shared by every component.
-let memoTick = null
-let memo = null
+// Computed once per (tick, view) and shared by every component.
+const deriveCache = new WeakMap()
 
 const EMPTY = {
   cells: [],
@@ -94,7 +117,8 @@ const EMPTY = {
 
 export function derive(tick) {
   if (!tick) return EMPTY
-  if (tick === memoTick) return memo
+  const hit = deriveCache.get(tick)
+  if (hit) return hit
   const cells = tick.cells?.features || []
   const aircraft = tick.aircraft || []
   const cellsById = new Map()
@@ -140,8 +164,7 @@ export function derive(tick) {
     return (a.eta_s ?? 0) - (b.eta_s ?? 0)
   })
 
-  memoTick = tick
-  memo = {
+  const memo = {
     cells,
     cellsById,
     aircraft,
@@ -153,10 +176,11 @@ export function derive(tick) {
     attacks: tick.attacks || [],
     incidents,
   }
+  deriveCache.set(tick, memo)
   return memo
 }
 
-export const useDerived = () => derive(useStore((s) => s.tick))
+export const useDerived = () => derive(useViewTick())
 
 /** Is this alert caused by a simulated attack? */
 export function alertInjected(alert, d) {

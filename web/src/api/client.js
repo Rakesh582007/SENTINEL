@@ -75,7 +75,7 @@ export const api = {
   deleteAttack: (attackId) => request('DELETE', `/attacks/${id(attackId)}`),
   resetAttacks: () => request('DELETE', '/attacks'),
 
-  incidents: () => request('GET', '/incidents'),
+  incidents: (view = 'sim') => request('GET', `/incidents?${q({ view })}`),
   incident: (incidentId) => request('GET', `/incidents/${id(incidentId)}`),
   reportUrl: (incidentId) => `${API_BASE}/api/incidents/${id(incidentId)}/report.pdf`,
 
@@ -87,7 +87,7 @@ export const api = {
   sentinelHistory: (device = 'sentinel-1', minutes = 5) => request('GET', `/sentinel/history?${q({ id: device, minutes })}`),
 
   // {id, summary, source: 'ai'|'template', model, label, generated_ts, cached, facts}; 404 when the hexagon is gone.
-  cellSummary: (h3) => request('GET', `/cells/${id(h3)}/summary`),
+  cellSummary: (h3, view = 'sim') => request('GET', `/cells/${id(h3)}/summary?${q({ view })}`),
 }
 
 /** One readable sentence for a failed call. */

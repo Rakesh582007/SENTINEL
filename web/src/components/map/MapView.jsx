@@ -1,11 +1,12 @@
 import { useCallback, useEffect } from 'react'
 import { MapContainer, ZoomControl, useMap, useMapEvents } from 'react-leaflet'
 import { DEFAULT_VIEW, STANDALONE } from '../../config.js'
-import { useStore } from '../../store.js'
+import { useStore, useViewTick } from '../../store.js'
 import Legend from '../Legend.jsx'
 import AircraftLayer from './AircraftLayer.jsx'
 import BaseLayers from './BaseLayers.jsx'
 import CellsLayer from './CellsLayer.jsx'
+import ReplayFocusBanner from './ReplayFocusBanner.jsx'
 
 function MapBehaviour() {
   const map = useMap()
@@ -72,7 +73,7 @@ function MapControls() {
 }
 
 function FeedOverlay() {
-  const tick = useStore((s) => s.tick)
+  const tick = useViewTick()
   const connection = useStore((s) => s.connection)
   if (tick && (tick.aircraft?.length || tick.cells?.features?.length)) return null
   return (
@@ -109,7 +110,7 @@ function FeedOverlay() {
 }
 
 function StaleBanner() {
-  const tick = useStore((s) => s.tick)
+  const tick = useViewTick()
   const connection = useStore((s) => s.connection)
   if (!tick || connection.state === 'open') return null
   return (
@@ -172,6 +173,7 @@ export default function MapView({ overlays = null, bottom = null }) {
         </MapContainer>
         <MapControls />
         <StaleBanner />
+        <ReplayFocusBanner />
         <FeedOverlay />
       </div>
       {/* Desktop: floats over the bottom of the map. Phone: sits below it so the map stays visible. */}
