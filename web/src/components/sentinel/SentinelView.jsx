@@ -9,10 +9,9 @@ import { ago, istTime } from '../../lib/time.js'
 import { useStore } from '../../store.js'
 import { Button, Fact, InjectedBadge, useNow } from '../ui.jsx'
 import LineChart from './LineChart.jsx'
-import { baseValues, DROP_DB, SIM_BASELINE, SIM_ID, useSim } from './simStore.js'
+import { baseValues, JAM_SNR_DB, SIM_BASELINE, SIM_ID, useSim } from './simStore.js'
 
 const WINDOW_S = 300
-const ALARM_DROP_DB = 10 // backend sentinel.SNR_DROP_DB
 
 function useHistory(device) {
   const [rows, setRows] = useState([])
@@ -234,8 +233,8 @@ function AttackControls() {
         <InjectedBadge />
       </div>
       <p className="text-[13.5px] leading-snug text-ink-700">
-        Drag any satellite&apos;s signal below, or lower them all at once. The status uses the server&apos;s rules: {DROP_DB} dB under the normal {SIM_BASELINE.toFixed(1)} dB-Hz reads as
-        jamming, and so does losing the fix (a fix needs 4 or more satellites above 20 dB-Hz). Nothing is sent to the real box or the backend.
+        Drag any satellite&apos;s signal below, or lower them all at once. The status uses the server&apos;s rule: an average signal below {JAM_SNR_DB} dB-Hz reads as
+        jamming (normal here is {SIM_BASELINE.toFixed(1)}); anything above is normal, even without a fix. Nothing is sent to the real box or the backend.
       </p>
       <div>
         <div className="flex items-baseline justify-between">
@@ -250,11 +249,11 @@ function AttackControls() {
         <Button size="sm" onClick={() => setDrop(0)}>
           Healthy
         </Button>
-        <Button size="sm" onClick={() => setDrop(12)}>
-          Jam by 12 dB
+        <Button size="sm" onClick={() => setDrop(10)}>
+          Weaker by 10 dB (still normal)
         </Button>
-        <Button size="sm" onClick={() => setDrop(25)}>
-          Heavy jam, fix lost
+        <Button size="sm" onClick={() => setDrop(20)}>
+          Jam: 20 dB down
         </Button>
         <Button size="sm" variant="ghost" onClick={reset}>
           Reset
@@ -272,12 +271,10 @@ function Body({ box, rows, events, simulated, entries, onSatChange, controls, no
   const baseline = box.baseline_snr
   const snrPoints = rows.map((p) => ({ t: p.recv_ts, v: typeof p.avg_snr === 'number' ? p.avg_snr : null }))
   const satPoints = rows.map((p) => ({ t: p.recv_ts, v: typeof p.sats_used === 'number' ? p.sats_used : null }))
-  const refs = baseline
-    ? [
-        { label: `normal ${baseline.toFixed(1)}`, value: baseline, color: '#4B5E78' },
-        { label: `alarm < ${(baseline - ALARM_DROP_DB).toFixed(1)}`, value: baseline - ALARM_DROP_DB, color: '#E5484D', ink: '#8F1F23' },
-      ]
-    : []
+  const refs = [
+    ...(baseline ? [{ label: `normal ${baseline.toFixed(1)}`, value: baseline, color: '#4B5E78' }] : []),
+    { label: `jamming < ${JAM_SNR_DB}`, value: JAM_SNR_DB, color: '#E5484D', ink: '#8F1F23' },
+  ]
 
   return (
     <div className="grid gap-6 lg:grid-cols-[minmax(320px,2fr)_3fr]">
@@ -324,7 +321,7 @@ function Body({ box, rows, events, simulated, entries, onSatChange, controls, no
         <p className="text-[14px] leading-relaxed text-ink-700">
           {simulated
             ? 'This is a stand-in for the real box, so the rules can be shown without hardware. Switch to Live to see the real one.'
-            : `The box learns its normal satellite signal in its first two minutes with a fix. A drop of ${ALARM_DROP_DB} dB or more, or losing the fix, reads as jamming; a fixed box that appears to move reads as spoofing. It shows the method on a table; at border airports it would cover the gaps where too few aircraft fly.`}
+            : `The box learns its normal satellite signal in its first two minutes with a fix. An average signal below ${JAM_SNR_DB} dB-Hz reads as jamming (above it is normal, even if the fix drops); a fixed box that appears to move reads as spoofing. It shows the method on a table; at border airports it would cover the gaps where too few aircraft fly.`}
         </p>
         {notice}
       </div>

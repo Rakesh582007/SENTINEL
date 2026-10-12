@@ -66,8 +66,9 @@ class Settings(BaseSettings):
     sentinel_history_max: int = 2000  # packets kept per device (~66 min at one packet per 2 s)
     # Server re-check of the box's alarms (sentinel.py; wall clock, it is real hardware)
     sentinel_baseline_s: float = Field(120.0, ge=10.0)  # fix held this long before baseline SNR + position are learned
-    sentinel_snr_drop_db: float = Field(10.0, gt=0.0)  # JAMMING: avg SNR this far below the baseline
-    sentinel_fix_loss_s: float = Field(5.0, gt=0.0)  # JAMMING: fix lost this long after a baseline existed
+    # JAMMING: average satellite signal below this many dB-Hz (fixed level, not relative to the baseline;
+    # a lost fix alone is not jamming). Open sky reads ~35-45, indoors ~25-30, foil over the antenna < 20.
+    sentinel_jam_snr_db: float = Field(22.0, gt=0.0, le=60.0)
     sentinel_move_m: float = Field(50.0, gt=0.0)  # SPOOF: the fixed box "moves" this far from its reference
     sentinel_alt_jump_m: float = Field(100.0, gt=0.0)  # SPOOF: its altitude jumps this much
 
