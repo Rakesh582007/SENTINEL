@@ -409,6 +409,19 @@ def test_after_a_loop_old_detections_do_not_match_the_reopened_event(tmp_path, c
     assert [e[1] for e in outcomes(client)] == ["detected", "detected"]
 
 
+def test_mode_switch_with_a_bad_file_keeps_the_current_mode_running(tmp_path, client, real_amritsar, monkeypatch):
+    """Audit S9: the old ingest was stopped before the file names were checked."""
+    rt = client.app.state.rt
+    monkeypatch.setattr(settings, "recordings_dir", tmp_path)  # rt.settings is this object
+    good = append_line(tmp_path, make_line(POLL_TS, "adsb.fi", {"name": "amritsar"}, 200, 300, None, real_amritsar), "rs9test")
+    assert client.post("/api/mode", json={"mode": "replay", "recordings": [good.name]}).status_code == 200
+    running = rt.ingest_task
+    r = client.post("/api/mode", json={"mode": "replay", "recordings": ["nope.jsonl.gz"]})
+    assert r.status_code == 404 and "nope.jsonl.gz" in r.json()["detail"]
+    assert rt.mode == "replay" and rt.ingest_task is running and not running.done()
+    assert [p.name for p in rt.replayer.files] == [good.name]
+
+
 def test_unknown_ids_are_404_not_500(client):
     assert client.patch("/api/attacks/jam-999", json={"strength": 0.5}).status_code == 404
     assert client.delete("/api/attacks/jam-999").status_code == 404

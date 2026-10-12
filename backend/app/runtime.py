@@ -144,6 +144,8 @@ class Runtime:
         self.persist_ground_truth()
 
     async def start(self, mode: str, files: list[str] | None = None, speed: float | None = None, start_ts: float | None = None) -> None:
+        # Resolve the recordings BEFORE stopping anything: a bad name must leave the current mode running.
+        chosen = self.replay_files(files) if mode == "replay" else None
         await self.stop_ingest()
         self.reset_experiment()
         self.mode = mode
@@ -152,7 +154,6 @@ class Runtime:
             self.poller = LivePoller(self)
             self.ingest_task = asyncio.create_task(self.poller.run(), name="live-poller")
         else:
-            chosen = self.replay_files(files)
             self.replayer = Replayer(self, chosen, speed or self.settings.replay_speed, start_ts, self.settings.replay_loop)
             self.clock.use_replay(time.time())  # placeholder until the first seek
             self.ingest_task = asyncio.create_task(self.replayer.run(), name="replayer")
