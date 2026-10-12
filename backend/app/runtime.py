@@ -146,10 +146,22 @@ class Runtime:
             self.poller = LivePoller(self)
             self.ingest_task = asyncio.create_task(self.poller.run(), name="live-poller")
         else:
-            chosen = choose_files(self.settings.recordings_dir, files, self.settings.replay_default_hours)
+            chosen = self.replay_files(files)
             self.replayer = Replayer(self, chosen, speed or self.settings.replay_speed, start_ts, self.settings.replay_loop)
             self.clock.use_replay(time.time())  # placeholder until the first seek
             self.ingest_task = asyncio.create_task(self.replayer.run(), name="replayer")
+
+    def replay_files(self, names: list[str] | None) -> list[Path]:
+        """What a replay plays: the names given, else GAW_REPLAY_FILES, else the newest hours
+        (or the bundled sample). Unknown names raise FileNotFoundError."""
+        pinned = self.settings.replay_file_list
+        try:
+            return choose_files(self.settings.recordings_dir, names or pinned or None, self.settings.replay_default_hours)
+        except FileNotFoundError as e:
+            if not names and pinned:
+                raise FileNotFoundError(f"GAW_REPLAY_FILES lists recordings that do not exist ({e}); "
+                                        "fix the names (GET /api/recordings lists them) or unset it") from e
+            raise
 
     def set_region(self, name: str | None = None, points: str | None = None) -> None:
         if points:

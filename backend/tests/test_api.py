@@ -7,11 +7,12 @@ import time
 import pytest
 from fastapi.testclient import TestClient
 
-from app.config import reset_detection
+from app.config import Settings, reset_detection, settings
 from app.ingest.poller import LivePoller
 from app.ingest.recording import append_line, make_line
 from app.ingest.replay import Replayer
 from app.main import app
+from app.runtime import Runtime
 from conftest import POLL_TS, make, pdf_text
 
 
@@ -309,6 +310,26 @@ def test_state_changing_routes_run_on_the_event_loop_thread(client, monkeypatch)
     client.delete(f"/api/attacks/{aid}")
     client.delete("/api/attacks")
     assert len(seen) == 4 and set(seen) == {loop_thread}
+
+
+def test_replay_files_setting_pins_the_recording(tmp_path):
+    for run in ("r000001", "r000002"):
+        append_line(tmp_path, make_line(POLL_TS, "adsb.fi", {"name": "amritsar"}, 200, 300, None, {"ac": []}), run)
+    pinned = "rec_20261011_06_r000001.jsonl.gz"
+    rt = Runtime(Settings(recordings_dir=tmp_path, replay_files=f" {pinned} ", db_path=tmp_path / "t.db"))
+    assert rt.replay_files(None) == [tmp_path / pinned]  # instead of the newest hours (both files)
+    assert rt.replay_files(["rec_20261011_06_r000002.jsonl.gz"]) == [tmp_path / "rec_20261011_06_r000002.jsonl.gz"]
+    with pytest.raises(FileNotFoundError, match="GAW_REPLAY_FILES"):
+        Runtime(Settings(recordings_dir=tmp_path, replay_files="nope.jsonl.gz")).replay_files(None)
+
+
+def test_startup_fails_clearly_when_replay_files_are_unknown(monkeypatch):
+    monkeypatch.setattr(settings, "autostart", True)
+    monkeypatch.setattr(settings, "mode", "replay")
+    monkeypatch.setattr(settings, "replay_files", "nope.jsonl.gz")
+    with pytest.raises(RuntimeError, match="GAW_REPLAY_FILES lists recordings that do not exist"):
+        with TestClient(app):
+            pass
 
 
 def test_unknown_ids_are_404_not_500(client):

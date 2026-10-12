@@ -36,6 +36,14 @@ python scripts/inspect_recording.py
 
 Startup mode comes from `GAW_MODE` (default `replay`: the newest 3 h of `data/recordings`, or the bundled `data/sample` if there are none). Switch at runtime with `POST /api/mode {"mode": "live"}`. Stop `record.py` while the app runs live: the live poller writes recordings itself (`GAW_RECORD_LIVE`).
 
+**Pin the demo recording** with `GAW_REPLAY_FILES` (comma-separated file names from `data/recordings`; `GET /api/recordings` lists them), in the environment or `.env`:
+
+```bash
+GAW_REPLAY_FILES=rec_20261011_08_r080803.jsonl.gz,rec_20261011_09_r080803.jsonl.gz
+```
+
+When set, every replay started without explicit names (startup, and `POST /api/mode {"mode": "replay"}`) plays exactly those files instead of "the newest 3 h", so the demo shows a window you have checked. An unknown name stops startup with an error naming `GAW_REPLAY_FILES`.
+
 ## Status (11 Oct, backend complete)
 
 | Area | Status |

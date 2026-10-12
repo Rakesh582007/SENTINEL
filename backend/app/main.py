@@ -47,7 +47,11 @@ async def lifespan(app: FastAPI):
     app.state.rt = rt
     tick_task = None
     if settings.autostart:
-        await rt.start(settings.mode)
+        try:
+            await rt.start(settings.mode)
+        except FileNotFoundError as e:
+            log.error("startup failed: %s", e)
+            raise RuntimeError(f"startup failed: {e}") from None
         tick_task = asyncio.create_task(tick_loop(rt), name="tick-loop")
         log.info("started in %s mode, region %s, sources %s", rt.mode, rt.region_name, rt.sources)
     yield

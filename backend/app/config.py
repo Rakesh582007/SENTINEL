@@ -46,6 +46,7 @@ class Settings(BaseSettings):
     aircraft_max_age_s: float = 90.0  # an aircraft stays on the map this long after its last record
 
     # Replay
+    replay_files: str = ""  # GAW_REPLAY_FILES: comma-separated names in recordings_dir; pins what replay plays
     replay_default_hours: float = 3.0  # with no files chosen, replay the newest N hours of recordings
     replay_speed: float = 1.0
     replay_max_speed: float = 20.0
@@ -57,6 +58,10 @@ class Settings(BaseSettings):
     # Ground Sentinel (ESP32 box)
     sentinel_offline_s: float = 10.0
     sentinel_history_max: int = 2000  # packets kept per device (~66 min at one packet per 2 s)
+
+    @property
+    def replay_file_list(self) -> list[str]:
+        return [n.strip() for n in self.replay_files.split(",") if n.strip()]
 
 
 class DetectionConfig(BaseModel):
