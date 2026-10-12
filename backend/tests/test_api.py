@@ -47,6 +47,7 @@ def advance(rep, seconds):
 
 
 JSON = {"content-type": "application/json"}
+DELHI = [28.47, 77.20]  # the busiest res-3 cell in the real_amritsar snapshot (15 aircraft)
 
 
 def test_health_and_map(client):
@@ -360,6 +361,24 @@ def test_one_jammer_over_several_cells_is_one_detection_and_no_unexplained_alarm
     assert sum(f["properties"]["state"] == "jammed" for f in t["cells"]["features"]) >= 3
     ev = client.get("/api/evaluation").json()
     assert (ev["events"], ev["detected"], ev["unexplained_alarms"]) == (1, 1, 0)
+
+
+def test_incidents_and_their_pdf_survive_a_replay_seek(tmp_path, client, real_amritsar):
+    """Audit S7: a seek or loop used to delete every incident (PDF -> 404)."""
+    rt = client.app.state.rt
+    rep = replay_of(tmp_path, rt, real_amritsar)
+    rep.seek(rep.t_start + 60)
+    client.post("/api/attacks", json={"kind": "jamming", "center": DELHI, "radius_km": 60, "strength": 1.0})
+    advance(rep, 60)
+    rt.compute_tick()
+    [inc] = client.get("/api/incidents").json()
+    assert inc["open"]
+    jumped_at = rt.clock.now()
+    rep.seek(rep.t_start + 30)  # scrub backwards
+    [after] = client.get("/api/incidents").json()
+    assert after["id"] == inc["id"] and not after["open"] and after["closed_ts"] == jumped_at
+    r = client.get(f"/api/incidents/{inc['id']}/report.pdf")
+    assert r.status_code == 200 and r.content[:4] == b"%PDF"
 
 
 def test_unknown_ids_are_404_not_500(client):

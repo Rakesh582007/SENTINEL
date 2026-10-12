@@ -168,11 +168,22 @@ class IncidentTracker:
         return out
 
     def summary(self) -> list[dict]:
-        return [self._view(i, False) for i in sorted(self._incidents.values(), key=lambda i: -i["opened_ts"])]
+        """Newest first. Creation order, not opened_ts: after a replay jumps back in time, an
+        incident opened after the jump has an earlier timestamp but is still the newest."""
+        return [self._view(i, False) for i in reversed(list(self._incidents.values()))]
 
     def get(self, incident_id: str) -> dict | None:
         inc = self._incidents.get(incident_id)
         return self._view(inc, True) if inc else None
 
+    def close_all(self, now: float) -> None:
+        """Replay seek or loop: the history belongs to the old time, so end every open incident
+        there, but keep them (the list and the PDFs survive the jump)."""
+        for inc in self._incidents.values():
+            if inc["closed_ts"] is None:
+                inc["closed_ts"] = max(now, inc["opened_ts"])
+                self._save(inc)
+
     def reset(self) -> None:
+        """Mode switch: a fresh experiment."""
         self._incidents.clear()

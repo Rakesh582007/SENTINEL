@@ -117,10 +117,11 @@ class Runtime:
         self.poller = None
         self.replayer = None
 
-    def clear_for_time_jump(self) -> None:
-        """Replay seek or loop: drop history that belongs to the old time; keep the attacks."""
+    def clear_for_time_jump(self, old_now: float | None = None) -> None:
+        """Replay seek or loop: drop history that belongs to the old time; keep the attacks,
+        and keep the incidents (closed at the moment of the jump)."""
         self.window.clear()
-        self.incidents.reset()
+        self.incidents.close_all(self.clock.now() if old_now is None else old_now)
         self._prev_states.clear()
         self._prev_flagged.clear()
         self.scenario = None  # a time jump cancels a running scenario (its times belong to the old clock)

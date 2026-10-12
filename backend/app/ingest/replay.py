@@ -116,7 +116,7 @@ class Replayer:
             return ts
         ts = max(self.t_start, min(float(ts), self.t_end))
         old = self.rt.clock.now()
-        self.rt.clear_for_time_jump()
+        self.rt.clear_for_time_jump(old)
         self.rt.injector.rebase(old, ts)
         self.rt.clock.use_replay(ts)
         lo = bisect.bisect_left(self.times, ts - self.rt.settings.window_keep_s)
