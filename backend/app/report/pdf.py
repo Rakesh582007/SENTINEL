@@ -218,6 +218,41 @@ def incident_pdf(incident: dict, summary: str | None = None, summary_label: str 
                            + escape(", ".join(cells[:10]) + (" ..." if len(cells) > 10 else "")), s["small"]))
     story += [KeepTogether(where), Spacer(1, 5 * mm)]
 
+    # ---- aircraft to notify (early warnings into this incident's area)
+    warned = incident.get("warned", [])
+    affected = {a["hex"] for a in incident.get("aircraft", [])}
+    story.append(Paragraph(f"Aircraft to notify ({len(warned)})", s["h2"]))
+    story.append(Paragraph(
+        "Aircraft whose current track and speed took them into this area within the next 15 minutes. "
+        "Pass this list to the controlling ATC unit and the airlines so crews can prepare backup navigation. "
+        "This system is receive-only: it does not contact aircraft itself.", s["small"]))
+    story.append(Spacer(1, 2 * mm))
+    if warned:
+        rows = [[Paragraph(h, s["head"]) for h in ("Flight", "Aircraft ID", "First warned", "Time to entry then", "Status", "Area")]]
+        for w in warned[:MAX_ROWS]:
+            eta = w.get("eta_s")
+            eta_txt = "-" if eta is None else ("under 1 min" if eta < 60 else f"~{round(eta / 60)} min")
+            status = "Entered: GPS affected" if w["hex"] in affected else "Heading in / passed edge"
+            rows.append([
+                Paragraph(escape(w.get("flight") or "unknown"), s["cellb"]),
+                Paragraph(escape(w["hex"].upper()), s["cell"]),
+                Paragraph(ist(w["first_warned_ts"], "%H:%M:%S").replace(" IST", ""), s["cell"]),
+                Paragraph(eta_txt, s["cell"]),
+                Paragraph(status, s["cell"]),
+                Paragraph("<font color='#F26B1D'><b>Test attack</b></font>" if w.get("injected") else "Real", s["cell"]),
+            ])
+        wt = Table(rows, colWidths=[24 * mm, 22 * mm, 25 * mm, 32 * mm, 54 * mm, 21 * mm], repeatRows=1)
+        wt.setStyle(TableStyle([("BACKGROUND", (0, 0), (-1, 0), tone), ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+                                ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, PANEL]),
+                                ("LINEBELOW", (0, 0), (-1, -1), 0.4, RULE), ("TOPPADDING", (0, 0), (-1, -1), 4.5),
+                                ("BOTTOMPADDING", (0, 0), (-1, -1), 5)]))
+        story.append(wt)
+        if len(warned) > MAX_ROWS:
+            story.append(Paragraph(f"... and {len(warned) - MAX_ROWS} more.", s["small"]))
+    else:
+        story.append(Paragraph("No aircraft was projected to fly into this area while the incident was open.", s["body"]))
+    story.append(Spacer(1, 6 * mm))
+
     # ---- aircraft
     story.append(Paragraph(f"Affected aircraft ({n})", s["h2"]))
     aircraft = incident.get("aircraft", [])

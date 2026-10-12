@@ -81,7 +81,7 @@ function SentinelCard({ a }) {
   )
 }
 
-export default function AlertsPanel() {
+export default function AlertsPanel({ title = 'Early warnings', simulator = false }) {
   const d = useDerived()
   const tick = useViewTick()
   const setTab = useStore((s) => s.setTab)
@@ -91,8 +91,13 @@ export default function AlertsPanel() {
   return (
     <section aria-labelledby="alerts-title" className="space-y-2.5">
       <SectionTitle aside={tick ? `${alerts.length} active` : null}>
-        <span id="alerts-title">Early warnings</span>
+        <span id="alerts-title">{title}</span>
       </SectionTitle>
+      {simulator && alerts.length ? (
+        <p className="text-[12.5px] leading-snug text-ink-600">
+          Real flights whose current course takes them into a test-attack area. In a real event this is the list ATC and the airlines would call; it is in each incident's PDF.
+        </p>
+      ) : null}
       {alerts.length ? (
         <ul className="space-y-2" aria-live="polite">
           {alerts.map((a) =>
@@ -106,9 +111,9 @@ export default function AlertsPanel() {
       ) : (
         <div className="rounded-lg border border-dashed border-sand-400 p-3 text-[14px] leading-snug text-ink-600">
           <p>No aircraft is heading into a jammed or spoofed hexagon in the next 15 minutes.</p>
-          <button type="button" className="mt-2 font-semibold text-air-700 underline-offset-4 hover:underline" onClick={() => setTab('simulator')}>
+          {simulator ? null : <button type="button" className="mt-2 font-semibold text-air-700 underline-offset-4 hover:underline" onClick={() => setTab('simulator')}>
             Inject a test jammer in the Attack simulator
-          </button>
+          </button>}
         </div>
       )}
       <p className="text-[12.5px] leading-snug text-ink-600">

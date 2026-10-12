@@ -96,6 +96,11 @@ export function IncidentCard({ inc }) {
           </div>
         </dl>
 
+        {inc.n_warned ? (
+          <p className="mt-1.5 text-[13px] text-ink-700">
+            <span className="font-semibold text-ink-900">{inc.n_warned}</span> {inc.n_warned === 1 ? 'flight' : 'flights'} warned on the way in (the PDF lists who to notify).
+          </p>
+        ) : null}
         {inc.injected ? (
           <div className="mt-2">
             <InjectedBadge />
@@ -116,7 +121,7 @@ export function IncidentCard({ inc }) {
   )
 }
 
-export default function IncidentsPanel() {
+export default function IncidentsPanel({ title = 'Incidents' }) {
   const d = useDerived()
   const tick = useViewTick()
   const incidents = [...d.incidents].sort((a, b) => Number(b.open) - Number(a.open) || b.opened_ts - a.opened_ts)
@@ -124,7 +129,7 @@ export default function IncidentsPanel() {
   return (
     <section aria-labelledby="incidents-title" className="space-y-2.5">
       <SectionTitle aside={tick ? `${nOpen} ongoing · ${incidents.length - nOpen} ended` : null}>
-        <span id="incidents-title">Incidents</span>
+        <span id="incidents-title">{title}</span>
       </SectionTitle>
       {incidents.length ? (
         <>

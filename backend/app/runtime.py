@@ -436,6 +436,7 @@ class Runtime:
         alarm_cells = {cell: c.state for cell, c in cells.items() if c.state in ALARM_STATES}
         alerts = warning.early_warnings(real_latest, alarm_cells, cfg, now) + sentinel_alerts
         self.real_incidents.update(cells, real_recs, cfg, now, flags)
+        self.real_incidents.note_warnings(alerts, now)
         aircraft = self._aircraft_rows(real_latest, flags, cfg, now)
         state_counts: dict[str, int] = {}
         for c in cells.values():
@@ -480,6 +481,7 @@ class Runtime:
         alerts += sentinel_alerts
         self._log_alerts(alerts, now)
         self.incidents.update(cells, recs, cfg, now, flags)
+        self.incidents.note_warnings(alerts, now)
         real = self._real_view(recs, latest, cfg, now, sentinel_alerts)
 
         for a in self.injector.live_attacks(now):
