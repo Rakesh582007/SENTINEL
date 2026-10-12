@@ -414,6 +414,7 @@ function tag(cur, pristine, attackId, changes) {
 // ------------------------------------------------------------------ sentinel.py (+ a simulated box)
 const BASELINE_S = 120
 const JAM_SNR_DB = 22 // config.sentinel_jam_snr_db
+const JAM_HOLD_S = 6 // config.sentinel_jam_hold_s
 const MOVE_M = 50
 const ALT_JUMP_M = 100
 const STATUSES = ['OK', 'SEARCHING', 'JAMMING', 'SPOOF', 'OFFLINE']
@@ -428,12 +429,18 @@ class SentinelStore {
   check(st, p, now) {
     const fix = Boolean(p.fix)
     const { avg_snr: snr, lat, lon, alt } = p
-    const jammed = typeof snr === 'number' && snr < JAM_SNR_DB
+    if (st.last_seen != null && now - st.last_seen > this.offlineS) st.low_since = null // the box went silent: start over
+    st.last_seen = now
+    const low = typeof snr === 'number' && snr < JAM_SNR_DB
+    if (!low) st.low_since = null
+    else if (st.low_since == null) st.low_since = now
+    const jammed = low && now - st.low_since >= JAM_HOLD_S
     const jamWhy = () => ['JAMMING', `signal ${snr.toFixed(1)} dB-Hz, below ${JAM_SNR_DB}`]
+    const dip = low && !jammed ? `signal ${snr.toFixed(1)} dB-Hz, below ${JAM_SNR_DB}, confirming` : null
     if (!fix) {
       st.fix_since = null
       if (st.last_fix_ts == null) return ['SEARCHING', 'no fix yet']
-      return jammed ? jamWhy() : ['OK', 'no fix, signal normal']
+      return jammed ? jamWhy() : ['OK', dip || 'no fix, signal normal']
     }
     st.last_fix_ts = now
     if (st.fix_since == null) st.fix_since = now
@@ -450,7 +457,7 @@ class SentinelStore {
         st.calib = []
       }
       if (jammed) return jamWhy()
-      return ['OK', st.baseline_snr == null ? 'learning baseline' : null]
+      return ['OK', dip || (st.baseline_snr == null ? 'learning baseline' : null)]
     }
     if (jammed) return jamWhy()
     if (st.ref && lat != null && lon != null) {
@@ -458,15 +465,15 @@ class SentinelStore {
       if (moved > MOVE_M) return ['SPOOF', `fixed box appears to move ${Math.round(moved)} m`]
       if (alt != null && st.ref[2] != null && Math.abs(alt - st.ref[2]) > ALT_JUMP_M) return ['SPOOF', `altitude jumped ${Math.round(Math.abs(alt - st.ref[2]))} m`]
     }
-    return ['OK', null]
+    return ['OK', dip]
   }
   add(packet, recvTs) {
     const device = String(packet.id || 'sentinel-1')
-    if (!this.state.has(device)) this.state.set(device, { fix_since: null, last_fix_ts: null, calib: [], baseline_snr: null, ref: null })
+    if (!this.state.has(device)) this.state.set(device, { fix_since: null, last_fix_ts: null, calib: [], baseline_snr: null, ref: null, low_since: null, last_seen: null })
     const st = this.state.get(device)
     const [serverStatus, why] = this.check(st, packet, recvTs)
     const status = STATUSES.includes(String(packet.status || 'OK').toUpperCase()) ? String(packet.status || 'OK').toUpperCase() : String(packet.status)
-    const entry = { ...packet, id: device, recv_ts: recvTs, status, server_status: serverStatus, server_reason: why, baseline_snr: st.baseline_snr }
+    const entry = { ...packet, id: device, recv_ts: recvTs, status, server_status: serverStatus, server_reason: why, baseline_snr: st.baseline_snr, rule: { jam_snr_db: JAM_SNR_DB, jam_hold_s: JAM_HOLD_S } }
     if (!this.packets.has(device)) this.packets.set(device, [])
     const q = this.packets.get(device)
     q.push(entry)

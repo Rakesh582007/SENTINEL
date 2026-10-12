@@ -13,10 +13,12 @@ Server rules (thresholds below):
 - Baseline: once the box has held a fix for BASELINE_S, the median avg_snr and
   the median position of that period become its reference (shown on the
   dashboard; the position is used for SPOOF).
-- JAMMING: avg_snr below JAM_SNR_DB (22 dB-Hz), once the box has had a fix at
-  least once. A fixed level, not "N dB below baseline": indoors the baseline
-  itself sits around 28-30 and small dips raised false alarms. A lost fix with
-  a normal signal is not jamming (OK, reason "no fix, signal normal").
+- JAMMING: avg_snr below JAM_SNR_DB (22 dB-Hz) for JAM_HOLD_S seconds in a row,
+  once the box has had a fix at least once. A fixed level, not "N dB below
+  baseline": indoors the baseline itself sits around 28-30 and small dips raised
+  false alarms. The hold stops a one-packet dip from flipping the status; at or
+  above 22 the status goes back to OK at once. A lost fix with a normal signal
+  is not jamming (OK, reason "no fix, signal normal").
 - SPOOF: the fixed box "moves" more than MOVE_M from its reference, or its
   altitude jumps more than ALT_JUMP_M.
 Alerts from this box are labelled as a signal test (antenna covered), never
@@ -34,6 +36,7 @@ STATUSES = ("OK", "SEARCHING", "JAMMING", "SPOOF", "OFFLINE")
 # Defaults of the server rules; the numbers live in config.Settings (sentinel_*), override via GAW_SENTINEL_*.
 BASELINE_S: float = Settings.model_fields["sentinel_baseline_s"].default
 JAM_SNR_DB: float = Settings.model_fields["sentinel_jam_snr_db"].default
+JAM_HOLD_S: float = Settings.model_fields["sentinel_jam_hold_s"].default
 MOVE_M: float = Settings.model_fields["sentinel_move_m"].default
 ALT_JUMP_M: float = Settings.model_fields["sentinel_alt_jump_m"].default
 
@@ -60,29 +63,42 @@ class _DeviceState:
         self.calib: list[tuple[float, float | None, float | None, float | None]] = []  # (snr, lat, lon, alt)
         self.baseline_snr: float | None = None
         self.ref: tuple[float, float, float | None] | None = None
+        self.low_since: float | None = None  # first packet of the current run below the jam level
+        self.last_seen: float | None = None
 
 
 class SentinelStore:
     def __init__(self, offline_s: float, max_len: int, baseline_s: float = BASELINE_S, jam_snr_db: float = JAM_SNR_DB,
-                 move_m: float = MOVE_M, alt_jump_m: float = ALT_JUMP_M) -> None:
+                 move_m: float = MOVE_M, alt_jump_m: float = ALT_JUMP_M, jam_hold_s: float = JAM_HOLD_S) -> None:
         self.offline_s = offline_s
         self.max_len = max_len
         self.baseline_s, self.jam_snr_db = baseline_s, jam_snr_db
         self.move_m, self.alt_jump_m = move_m, alt_jump_m
+        self.jam_hold_s = jam_hold_s
         self.packets: dict[str, deque] = {}
         self.state: dict[str, _DeviceState] = {}
 
     def _check(self, st: _DeviceState, p: dict, now: float) -> tuple[str, str | None]:
         fix = bool(p.get("fix"))
         snr, lat, lon, alt = _num(p.get("avg_snr")), _num(p.get("lat")), _num(p.get("lon")), _num(p.get("alt"))
-        jammed = snr is not None and snr < self.jam_snr_db
+        if st.last_seen is not None and now - st.last_seen > self.offline_s:  # the box went silent: start over
+            st.low_since = None
+        st.last_seen = now
+        low = snr is not None and snr < self.jam_snr_db
+        if not low:
+            st.low_since = None
+        elif st.low_since is None:
+            st.low_since = now
+        jammed = low and now - st.low_since >= self.jam_hold_s
+        dipping = low and not jammed  # below the level, not for long enough yet
+        dip = f"signal {snr:.1f} dB-Hz, below {self.jam_snr_db:.0f}, confirming" if dipping else None
         if not fix:
             st.fix_since = None
             if st.last_fix_ts is None:  # never had a fix (indoors at start-up): not an alarm
                 return "SEARCHING", "no fix yet"
             if jammed:
                 return "JAMMING", f"signal {snr:.1f} dB-Hz, below {self.jam_snr_db:.0f}"
-            return "OK", "no fix, signal normal"
+            return "OK", dip or "no fix, signal normal"
 
         st.last_fix_ts = now
         if st.fix_since is None:
@@ -100,7 +116,7 @@ class SentinelStore:
                 st.calib.clear()
             if jammed:
                 return "JAMMING", f"signal {snr:.1f} dB-Hz, below {self.jam_snr_db:.0f}"
-            return "OK", "learning baseline" if st.baseline_snr is None else None
+            return "OK", dip or ("learning baseline" if st.baseline_snr is None else None)
         if jammed:
             return "JAMMING", f"signal {snr:.1f} dB-Hz, below {self.jam_snr_db:.0f}"
         if st.ref and lat is not None and lon is not None:
@@ -109,14 +125,16 @@ class SentinelStore:
                 return "SPOOF", f"fixed box appears to move {moved_m:.0f} m"
             if alt is not None and st.ref[2] is not None and abs(alt - st.ref[2]) > self.alt_jump_m:
                 return "SPOOF", f"altitude jumped {abs(alt - st.ref[2]):.0f} m"
-        return "OK", None
+        return "OK", dip
 
     def add(self, packet: dict, recv_ts: float) -> dict:
         device = str(packet.get("id") or "sentinel-1")
         st = self.state.setdefault(device, _DeviceState())
         server_status, why = self._check(st, packet, recv_ts)
         entry = {**packet, "id": device, "recv_ts": recv_ts, "status": normalize_status(packet.get("status")),
-                 "server_status": server_status, "server_reason": why, "baseline_snr": st.baseline_snr}
+                 "server_status": server_status, "server_reason": why, "baseline_snr": st.baseline_snr,
+                 # lets the dashboard tell a current backend from a stale one that is still running the old rule
+                 "rule": {"jam_snr_db": self.jam_snr_db, "jam_hold_s": self.jam_hold_s}}
         self.packets.setdefault(device, deque(maxlen=self.max_len)).append(entry)
         return entry
 
