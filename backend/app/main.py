@@ -98,7 +98,11 @@ async def ws_endpoint(ws: WebSocket) -> None:
         if rt.last_tick:
             await manager.send(ws, rt.last_tick)  # the newcomer sees the map at once
         while True:
-            await ws.receive_text()  # clients do not need to send anything; this keeps the socket open
+            # Clients need not send anything; this keeps the socket open. receive() (not
+            # receive_text) so a binary frame is ignored instead of raising KeyError.
+            message = await ws.receive()
+            if message["type"] == "websocket.disconnect":
+                break
     except WebSocketDisconnect:
         pass
     finally:

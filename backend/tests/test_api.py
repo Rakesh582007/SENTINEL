@@ -11,7 +11,8 @@ from app.config import Settings, reset_detection, settings
 from app.ingest.poller import LivePoller
 from app.ingest.recording import append_line, make_line
 from app.ingest.replay import Replayer
-from app.main import app
+from app.api.ws import WSManager
+from app.main import app, manager
 from app.runtime import Runtime
 from conftest import POLL_TS, make, pdf_text
 
@@ -152,6 +153,44 @@ def test_websocket_sends_latest_tick_on_connect(client):
     with client.websocket_connect("/ws") as ws:
         msg = ws.receive_json()
     assert msg["type"] == "tick" and msg["stats"]["aircraft"] == 12
+
+
+def test_websocket_survives_a_binary_frame(client):
+    """Audit N5: receive_text() raised KeyError on a binary frame and dropped the socket."""
+    seed(client)
+    client.app.state.rt.compute_tick()
+    with client.websocket_connect("/ws") as ws:
+        assert ws.receive_json()["type"] == "tick"
+        ws.send_bytes(b"\x00\x01binary")
+        client.portal.call(manager.broadcast, {"type": "tick", "probe": 1})
+        assert ws.receive_json()["probe"] == 1  # still connected and still served
+
+
+def test_a_stalled_client_is_dropped_without_delaying_the_others():
+    class Stalled:
+        async def send_text(self, text):
+            await asyncio.sleep(3600)
+
+        async def close(self, code=1000):
+            await asyncio.sleep(3600)
+
+    class Healthy:
+        def __init__(self):
+            self.got = []
+
+        async def send_text(self, text):
+            self.got.append(text)
+
+    async def one_tick():
+        m = WSManager(send_timeout_s=0.05)
+        stalled, healthy = Stalled(), Healthy()
+        m.clients |= {stalled, healthy}
+        t0 = time.monotonic()
+        await m.broadcast({"type": "tick"})
+        return m, stalled, healthy, time.monotonic() - t0
+
+    m, stalled, healthy, took = asyncio.run(one_tick())
+    assert healthy.got and stalled not in m.clients and healthy in m.clients and took < 1.0
 
 
 def test_replay_load_seek_prefills_window(tmp_path, client, real_amritsar):
