@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import io
 import time
+from xml.sax.saxutils import escape
 
 from reportlab.lib import colors
 from reportlab.lib.pagesizes import A4
@@ -54,7 +55,8 @@ def summary_text(incident: dict) -> str:
     return text
 
 
-def incident_pdf(incident: dict) -> bytes:
+def incident_pdf(incident: dict, summary: str | None = None, summary_label: str | None = None) -> bytes:
+    """summary/summary_label: the AI-written or template note (app/ai/summary.py), shown under the title."""
     buf = io.BytesIO()
     injected = bool(incident.get("injected"))
     doc = SimpleDocTemplate(buf, pagesize=A4, leftMargin=16 * mm, rightMargin=16 * mm, topMargin=14 * mm, bottomMargin=14 * mm,
@@ -64,6 +66,7 @@ def incident_pdf(incident: dict) -> bytes:
     h1 = ParagraphStyle("h1", parent=ss["Title"], textColor=NAVY, fontSize=18, spaceAfter=2)
     body = ParagraphStyle("body", parent=ss["BodyText"], fontSize=9.5, leading=13)
     small = ParagraphStyle("small", parent=body, fontSize=8, textColor=colors.grey)
+    note = ParagraphStyle("note", parent=body, textColor=NAVY, backColor=colors.HexColor("#F2F5FA"), borderPadding=4)
     banner = ParagraphStyle("banner", parent=body, textColor=colors.white, backColor=ORANGE, borderPadding=4, fontName="Helvetica-Bold")
 
     kind = "GPS jamming" if incident["kind"] == "jamming" else "suspected GPS spoofing"
@@ -75,6 +78,9 @@ def incident_pdf(incident: dict) -> bytes:
         if incident.get("mixed"):
             story.append(Paragraph(MIXED_LINE, body))
         story.append(Spacer(1, 2 * mm))
+    if summary:
+        label = escape(summary_label or "Summary")
+        story += [Paragraph(f"<b>{label}:</b> {escape(summary)}", note), Spacer(1, 4 * mm)]
 
     facts = [
         ["Opened", ist(incident["opened_ts"])],

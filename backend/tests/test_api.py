@@ -614,6 +614,60 @@ def test_skipping_a_gap_in_the_recording_does_not_use_up_a_timed_attack(tmp_path
     assert any(r.injected == aid for r in rt.window.all() if r.poll_ts >= POLL_TS + 1000)
 
 
+def jam_delhi(client):
+    """An injected jammer over a busy cell, one tick. Returns the jammed cell's properties."""
+    rt = client.app.state.rt
+    c = (28.47, 77.20)
+    client.post("/api/attacks", json={"kind": "jamming", "center": list(c), "radius_km": 30, "strength": 1.0, "position_loss": 0.0})
+    rt.ingest_records([make(f"{i:06x}", c[0] + (i - 10) * 0.01, c[1]) for i in range(20)], now=POLL_TS)
+    t = rt.compute_tick()
+    [cell] = [f["properties"] for f in t["cells"]["features"] if f["properties"]["state"] == "jammed"]
+    return cell
+
+
+SUMMARY_KEYS = {"id", "summary", "source", "model", "label", "generated_ts", "cached", "facts"}
+
+
+def test_summary_endpoints_use_the_template_without_a_key(client):
+    cell = jam_delhi(client)
+    r = client.get(f"/api/cells/{cell['h3']}/summary")
+    assert r.status_code == 200 and set(r.json()) == SUMMARY_KEYS
+    s = r.json()
+    assert (s["id"], s["source"], s["model"], s["label"], s["cached"]) == (cell["h3"], "template", None, "Auto summary", False)
+    assert s["summary"].startswith("This is a simulated test attack") and s["facts"]["state"] == "jammed"
+    assert client.get(f"/api/cells/{cell['h3']}/summary").json()["cached"] is True
+    assert client.get("/api/cells/8f2830828052d25/summary").status_code == 404  # not in the current state
+    [inc] = client.get("/api/incidents").json()
+    i = client.get(f"/api/incidents/{inc['id']}/summary").json()
+    assert set(i) == SUMMARY_KEYS and i["facts"]["kind"] == "jamming" and "Incident" in i["summary"]
+    assert client.get("/api/incidents/nope/summary").status_code == 404
+    ai = client.get("/api/health").json()["ai"]
+    assert set(ai) == {"enabled", "key_present", "models", "last_model_used", "last_error"} and ai["key_present"] is False
+    text = pdf_text(client.get(f"/api/incidents/{inc['id']}/report.pdf").content)
+    assert "Auto summary:" in text and "INJECTED TEST ATTACK" in text
+
+
+def test_pdf_never_waits_longer_than_the_ai_timeout(client, monkeypatch):
+    from types import SimpleNamespace
+
+    from pydantic import SecretStr
+
+    class Hanging:
+        async def generate_content(self, model, contents, config):
+            await asyncio.sleep(30)
+
+    rt = client.app.state.rt
+    monkeypatch.setattr(settings, "gemini_api_key", SecretStr("test-key"))
+    monkeypatch.setattr(settings, "ai_timeout_s", 0.2)
+    rt.ai._client_factory = lambda key: SimpleNamespace(aio=SimpleNamespace(models=Hanging()))
+    jam_delhi(client)
+    [inc] = client.get("/api/incidents").json()
+    t0 = time.monotonic()
+    r = client.get(f"/api/incidents/{inc['id']}/report.pdf")
+    assert r.status_code == 200 and time.monotonic() - t0 < 2.0
+    assert "Auto summary:" in pdf_text(r.content)
+
+
 def test_unknown_ids_are_404_not_500(client):
     assert client.patch("/api/attacks/jam-999", json={"strength": 0.5}).status_code == 404
     assert client.delete("/api/attacks/jam-999").status_code == 404

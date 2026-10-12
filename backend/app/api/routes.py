@@ -7,7 +7,9 @@ keep them read-only.
 """
 from __future__ import annotations
 
+import asyncio
 import calendar
+import copy
 import time
 
 from fastapi import APIRouter, HTTPException, Query, Request
@@ -15,6 +17,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import Response
 from pydantic import ValidationError
 
+from app.ai.summary import build_cell_facts, build_incident_facts, cell_cache_key, incident_cache_key
 from app.config import get_detection, reset_detection, update_detection
 from app.detect.evaluate import evaluate
 from app.ingest.recording import list_recordings
@@ -236,16 +239,40 @@ def incident(incident_id: str, request: Request):
 
 
 @router.get("/incidents/{incident_id}/report.pdf")
-def incident_report(incident_id: str, request: Request):
-    inc = rt_of(request).incidents.get(incident_id)
+async def incident_report(incident_id: str, request: Request):
+    rt = rt_of(request)
+    inc = rt.incidents.get(incident_id)
     if inc is None:
         raise HTTPException(404, f"no incident {incident_id}")
-    try:
-        pdf = incident_pdf(inc)
-    except NotImplementedError as e:
-        raise HTTPException(501, str(e)) from e
+    facts = build_incident_facts(incident_id, rt.incidents, rt.mode, rt.clock.now())
+    try:  # the PDF never waits longer than GAW_AI_TIMEOUT_S for the AI: then it uses the template
+        summary = await asyncio.wait_for(rt.ai.summarize("incident", incident_id, facts, incident_cache_key(facts), rt.clock.now()),
+                                         timeout=rt.settings.ai_timeout_s)
+    except TimeoutError:
+        summary = rt.ai.template_result("incident", incident_id, facts, rt.clock.now())
+    pdf = await asyncio.to_thread(incident_pdf, copy.deepcopy(inc), summary["summary"], summary["label"])
     return Response(pdf, media_type="application/pdf",
                     headers={"Content-Disposition": f'attachment; filename="incident-{incident_id}.pdf"'})
+
+
+# ---------------------------------------------------------------- AI summaries (words only; rules decide)
+@router.get("/cells/{h3_id}/summary")
+async def cell_summary(h3_id: str, request: Request):
+    """Plain-English note on one hexagon, from the latest tick's rule-engine output."""
+    rt = rt_of(request)
+    facts = build_cell_facts(h3_id, rt.tick_state)
+    if facts is None:
+        raise HTTPException(404, f"no hexagon {h3_id} in the current state")
+    return await rt.ai.summarize("cell", h3_id, facts, cell_cache_key(facts), rt.clock.now())
+
+
+@router.get("/incidents/{incident_id}/summary")
+async def incident_summary(incident_id: str, request: Request):
+    rt = rt_of(request)
+    facts = build_incident_facts(incident_id, rt.incidents, rt.mode, rt.clock.now())
+    if facts is None:
+        raise HTTPException(404, f"no incident {incident_id}")
+    return await rt.ai.summarize("incident", incident_id, facts, incident_cache_key(facts), rt.clock.now())
 
 
 @router.get("/evaluation")
