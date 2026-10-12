@@ -322,3 +322,27 @@ Build order (stop at any point with something demo-able):
 3. `git add -A && git commit -m "..." && git push origin feat/web`.
 4. In the claude.ai project chat: **"review feat/web"**. It gets pulled, checked against this file and merged to `main`.
 5. Backend changes needed by the frontend (a missing field, an endpoint): ask in the project chat; don't patch the backend from the frontend branch.
+
+---
+
+## 13. Backend additions (12 Oct, branch `fix/backend-audit`)
+
+Nothing was renamed or removed; these fields and endpoints were **added**.
+
+**Tick payload (`/ws`)**
+- `cells.features[].properties.injected` (bool): any simulated effect in this hexagon -> show **INJECTED TEST ATTACK**. Use this, not `n_injected == n_bad`.
+- `cells.features[].properties.mixed` (bool): simulated and real (non-injected) problems together -> e.g. "INJECTED TEST ATTACK + real degradation".
+- `alerts[].mixed` (bool; always `false` on sentinel alerts). `alerts[].injected` is now true whenever the alarm cell has any simulated effect (spoof-caused warnings included).
+- `incidents_summary[].mixed` (bool). `incidents_summary[].injected` is now true if any affected aircraft was simulated.
+- `aircraft[].spoof` can contain `"feed_glitch"`: info only, like `"recovery_jump"` (a data-feed hiccup, not spoofing). Outline purple only for the strong reasons.
+- `replay.last_error`, `replay.last_error_ts`: the newest error inside playback (playback carried on). Show it small, e.g. in the replay bar.
+- Incident ids now look like `inc-r044537-1` (run id inside); treat them as opaque strings.
+
+**REST**
+- `GET /api/cells/{h3}/summary` and `GET /api/incidents/{id}/summary` -> `{id, summary, source: "ai"|"template", model, label, generated_ts, cached, facts}`. Show `summary` with `label` ("AI-written summary" or "Auto summary") as a caption, e.g. in the hexagon popup and the incident card. 404 = not in the current state. Can take a few seconds when the AI answers: show a spinner, call it on click (not every tick).
+- `GET /api/alerts?active=false` -> alerts that have ended (`first_ts`, `last_ts`, `ended_ts`); `active=true` (default) = current alerts.
+- `GET /api/health` gains `last_error`, `last_error_ts` (ingest) and `ai: {enabled, key_present, models, last_model_used, last_error}`.
+- `PATCH /api/attacks/{id}` with `"hex": "random"` now picks a real airborne aircraft (409 if none). A `null` value leaves the field unchanged (except `duration_s`: null = until switched off); NaN/inf -> 422.
+- `GET /api/attacks/preview` needs `radius_km` 10-150 and a valid lat/lon (422 otherwise), like the jammer slider.
+- `POST /api/scenarios/{id}/run`: a broken scenario file or event -> 422 with a message naming the event and field.
+- The incident PDF now has the summary (with its label) under the title, and the "Also contains real (non-injected) degradation" line when `mixed`.

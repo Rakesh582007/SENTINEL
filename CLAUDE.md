@@ -12,7 +12,7 @@ A local web app (one laptop, no cloud) that detects GPS **jamming** and **spoofi
 - Never claim who is jamming. The jammer estimate is an "approximate area for investigation".
 - Every threshold lives in `backend/app/config.py`. Runtime-tunable ones are in `DetectionConfig`; read them with `get_detection()` on every tick.
 - All time logic uses `rt.clock.now()`, never `time.time()` (replay runs at up to 20x and seeks backwards). Exception: the Ground Sentinel, which is real hardware on the wall clock.
-- Detectors read `rt.window` (memory). Never query SQLite inside the tick.
+- Detectors read `rt.window` (memory). Never query SQLite inside the tick; writes are queued on `db.DbWriter` and flushed outside it.
 - The UI must credit adsb.fi and adsb.lol (adsb.fi terms: non-commercial use, credit + link).
 - `cd backend && pytest` stays green. Every detector gets tests before it gets wired in.
 - Never commit `data/recordings/` (5-10 MB per hour).
@@ -47,30 +47,32 @@ GAW_REPLAY_FILES=rec_20261011_08_r080803.jsonl.gz,rec_20261011_09_r080803.jsonl.
 
 When set, every replay started without explicit names (startup, and `POST /api/mode {"mode": "replay"}`) plays exactly those files instead of "the newest 3 h", so the demo shows a window you have checked. An unknown name stops startup with an error naming `GAW_REPLAY_FILES`.
 
-## Status (11 Oct, backend complete)
+## Status (12 Oct, backend audit fixed: branch `fix/backend-audit`)
 
 | Area | Status |
 |---|---|
-| Recorder, sources, regions, recording format | done; recorder running on the demo laptop |
+| Recorder, sources, regions, recording format | done; recorder running on the demo laptop (restart it to pick up the write-error fix) |
 | `scripts/inspect_recording.py` | done; coverage, GPS health, detectability, busiest cells |
-| Normalize, records, window, clock, runtime, db | done + tests |
-| Live poller, replay (speed, seek, loop) | done; smoke-tested end to end on real data |
+| Normalize, records, window, clock, runtime, db (queued writer, flushed outside the tick) | done + tests |
+| Live poller, replay (speed, seek, loop, gap skip) | done + tests; errors are logged and ingestion carries on (`last_error`) |
 | Attack injector (simulator) + scenario runner (`/api/scenarios`) | done + tests |
 | `detect/jamming.py` | done + tests |
-| `detect/spoofing.py` (jump, altitude offset, cluster, track; recovery jumps separated) | done + tests; zero false alarms on the 19-min real sample |
+| `detect/spoofing.py` (jump, altitude offset, cluster, track; recovery jumps and feed glitches separated) | done + tests; night of 11-12 Oct, no attacks: spoofing alarms 14 -> 4 after the D20 guards |
 | `detect/warning.py` (15-min projection alerts) | done + tests |
-| `detect/incidents.py` (+ SQLite) and `report/pdf.py` | done + tests |
+| `detect/incidents.py` (+ SQLite) and `report/pdf.py` | done + tests; injected = any, `mixed` flag (D19); kept across replay jumps |
 | `detect/evaluate.py` (detected / missed / undetectable / pending / unexplained) | done + tests |
 | `sentinel.py` server re-check (baseline SNR, fix loss, drift) | done + tests |
+| AI summary (`app/ai/summary.py`: Gemini + offline template, D22) | done + tests (Gemini mocked); AI text needs `GEMINI_API_KEY` in `backend/.env` |
 | `web/` | **not started** (full spec: `docs/FRONTEND_HANDOVER.md`) |
 | `firmware/` | not here (see `firmware/README.md`) |
 
 ## Next tasks, in order
 
-1. Frontend in `web/` against the tick payload below (two people from hour 0).
-2. Tonight: run `scripts/inspect_recording.py` on the night's recording; pick demo jammer spots from "busiest cells"; update `scenarios/demo1.json` centre if needed.
-3. Tune thresholds only with evidence from recordings; every change in `config.py` with a test.
-4. Each teammate reads one detector file end to end so they can explain it to judges.
+1. Frontend in `web/` against the tick payload below (two people from hour 0). New backend fields and endpoints: `docs/FRONTEND_HANDOVER.md` §13.
+2. Before the demo: replay a window you have checked and pin it with `GAW_REPLAY_FILES`; optionally put `GEMINI_API_KEY` in `backend/.env`.
+3. Tonight: run `scripts/inspect_recording.py` on the night's recording; pick demo jammer spots from "busiest cells"; update `scenarios/demo1.json` centre if needed.
+4. Tune thresholds only with evidence from recordings; every change in `config.py` with a test.
+5. Each teammate reads one detector file end to end so they can explain it to judges.
 
 ## Architecture in one picture
 
@@ -85,18 +87,18 @@ data/recordings ---> Replayer ------+   (simulated attacks)                     
 
 ```
 {type:"tick", ts, mode, region, h3_res, window_s,
- cells: GeoJSON FeatureCollection; properties {h3, state, n_aircraft, n_bad, frac_bad, lower_bound, n_injected, reasons},
+ cells: GeoJSON FeatureCollection; properties {h3, state, n_aircraft, n_bad, frac_bad, lower_bound, n_injected, reasons, injected, mixed},
  aircraft: [{hex, flight, lat, lon, pos_lost, alt_baro, alt_geom, on_ground, gs, track, nic, nac_p, source, age_s,
-             bad (reason or null), spoof ([reasons]), injected (attack ids or null)}],
- alerts: [{id, kind: early_warning | sentinel_jamming | sentinel_spoof, hex, flight, h3, cell_state, eta_s, entry, path, injected, severity, message}],
- incidents_summary: [{id, kind, opened_ts, closed_ts, open, cells, n_aircraft, est_lat, est_lon, est_radius_km, max_frac_bad, injected}],
+             bad (reason or null), spoof ([reasons]; recovery_jump / feed_glitch are info only), injected (attack ids or null)}],
+ alerts: [{id, kind: early_warning | sentinel_jamming | sentinel_spoof, hex, flight, h3, cell_state, eta_s, entry, path, injected, mixed, severity, message}],
+ incidents_summary: [{id, kind, opened_ts, closed_ts, open, cells, n_aircraft, est_lat, est_lon, est_radius_km, max_frac_bad, injected, mixed}],
  attacks: [{id, kind, live, remaining_s, center, radius_km, strength, position_loss, hex, offset_km, alt_offset_ft, label, max_aircraft_inside, ...}],
  sentinel: [{id, status (device), server_status, server_reason, baseline_snr, age_s, avg_snr, sats_used, ...}],
- replay: {t_start, t_end, ts, progress, speed, paused, ...} | null, scenario: {id, fired, remaining, next_ts} | null,
+ replay: {t_start, t_end, ts, progress, speed, paused, last_error, last_error_ts, ...} | null, scenario: {id, fired, remaining, next_ts} | null,
  stats: {aircraft, cells: {state: count}, window_records}, credits: {source: url}}
 ```
 
-Cell states: `insufficient` (< min aircraft), `clear`, `degraded`, `jammed`, `spoofing`.
+Cell states: `insufficient` (< min aircraft), `clear`, `degraded`, `jammed`, `spoofing`. `injected` = any simulated effect in it (show INJECTED TEST ATTACK); `mixed` = simulated and real together.
 
 ## AI summary (Gemini)
 
@@ -117,7 +119,7 @@ A plain-English note (2-4 sentences) on a hexagon or an incident, for judges and
 - **D5 One `Clock`** for live and replay.
 - **D6 `Record` is a slots dataclass** (fast replay); pydantic only at the API edge (`models.py`).
 - **D7 Injection is deterministic per aircraft** (hash of attack id + hex), so the Strength slider is monotonic and doesn't flicker. Altered records keep `original`: `DELETE /api/attacks/{id}` restores history (map clears at once); `PATCH active=false` stops injecting and lets the window age out (realistic).
-- **D8 Replay seek and loop keep attacks** (timers rebased, ground-truth events closed and reopened). A mode switch clears everything. Attacks only touch records that arrive after them, so keep replay playing during the simulator demo.
+- **D8 Replay seek and loop keep attacks** (timers rebased, ground-truth events closed and reopened). A mode switch clears everything. Attacks only touch records that arrive after them, so keep replay playing during the simulator demo. On a jump, open incidents are closed and kept, active alerts end, and evaluation matches only within one epoch (between two jumps).
 - **D9 Only GPS-sourced positions count** (`type` adsb_icao/adsb_other); MLAT, TIS-B, ADS-R and Mode S are excluded from integrity checks.
 - **D10 Parse readsb extras**: `lastPosition` (position lost), `gpsOkBefore` / `gpsOkLat` / `gpsOkLon` (aggregator saw GPS loss) — a `gpsOkBefore` record counts as bad.
 - **D11 `GET /api/attacks/preview`** reports the busiest H3 cell under the circle, because detection is per cell: a circle with 4 aircraft spread over 3 cells detects nothing.
@@ -128,6 +130,9 @@ A plain-English note (2-4 sentences) on a hexagon or an incident, for judges and
 - **D16 Altitude offset is compared as a fraction of altitude** (GPS minus baro grows with height, ~+4%), so a normal low aircraft isn't flagged against high peers.
 - **D18 Strong vs weak spoofing evidence.** First live run (11 Oct 13:50) raised two inland one-aircraft spoofing alarms. Now `impossible_jump` / `colocation_cluster` can turn a cell purple alone; `alt_offset_outlier` / `track_mismatch` must repeat on the aircraft and need `spoof_cell_min_flags` (2) aircraft per cell. A judge's spoof with `offset_km` > 0 still turns its cell purple; an altitude-only spoof flags the aircraft, not the cell.
 - **D17 Attacks act only from their start time and expire only by duration**; evaluation never calls an unmatched alarm "false", because on live data it may be real.
+- **D19 Injected = any, plus `mixed`.** A cell, alert or incident is labelled injected when ANY bad or spoof-flagged aircraft in it carries injected records (it was: all of them). One naturally low-NACp aircraft must not make a simulated attack look real; 26 of 47 usable windows in the `demo1` jammer cell had one. `mixed` = simulated and real (non-injected) effects together; the PDF then adds "Also contains real (non-injected) degradation".
+- **D20 Spoof feed-glitch and cluster-persistence guards.** `impossible_jump` becomes info-only `feed_glitch` when the jump's start had barely moved since the fix before it although the aircraft reported flying (moved < `spoof_frozen_speed_frac` x gs), or when >= `spoof_mass_jump_min` aircraft jump in the same poll: adsb.fi froze for 30 s on 12 Oct 01:25 IST and five aircraft "jumped" at once. `colocation_cluster` needs the same aircraft stacked on the same spot for `spoof_cluster_min_polls` polls: in-trail THA flights at FL330/350/390 passed one point within 10 s, while a real pinned spoof near Amritsar (11 Oct 23:34, FL195/370/390) stayed over a minute and is still caught. Same night, no attacks: spoofing alarms 14 -> 4. Trade-off: a spoofer that moves 3+ aircraft in the same poll is logged `feed_glitch` by the jump rule; a pinned group still trips the cluster rule.
+- **D21 `GAW_REPLAY_FILES` pins the replayed recordings** for every replay started without explicit names (startup and `POST /api/mode`); unknown names stop startup with a clear error. "The newest 3 h" made the demo depend on when uvicorn started.
 - **D22 AI words, rules decide; template fallback offline.** Gemini only rephrases rule-engine facts on request (never in the tick, never changing a state, flag or alert). Without a key, offline, rate-limited or on any model failure, a deterministic Python template from the same facts is used, so the demo never depends on the network.
 
 ## Measured facts (Sun 11 Oct 2026, 12:14-12:36 IST)
