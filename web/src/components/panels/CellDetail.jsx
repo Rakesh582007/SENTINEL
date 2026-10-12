@@ -2,7 +2,8 @@ import { useEffect, useState } from 'react'
 import { ApiError, api, errorText } from '../../api/client.js'
 import { STANDALONE } from '../../config.js'
 import { nearestAirport } from '../../data/airports.js'
-import { fmtLatLon, haversineKm } from '../../lib/geo.js'
+import { describePlace } from '../../data/places.js'
+import { bearingDeg, fmtLatLon, haversineKm } from '../../lib/geo.js'
 import { BAD_REASON, BAD_SHORT, hasSpoofEvidence, stateOf } from '../../lib/states.js'
 import { clock, istHM } from '../../lib/time.js'
 import { alertInjected, useDerived, useStore } from '../../store.js'
@@ -11,6 +12,21 @@ import { Button, Fact, InjectedBadge, StateChip } from '../ui.jsx'
 import { IncidentCard } from './IncidentsPanel.jsx'
 
 const pct = (x) => `${Math.round((x || 0) * 100)}%`
+
+// One sentence anyone can follow, before the technical detail.
+const PLAIN = {
+  jammed: 'Planes flying over this area are losing their GPS signal. Several different planes, so it is not one faulty plane.',
+  spoofing: 'Planes here are being shown a fake position: their GPS says they are somewhere they cannot be.',
+  degraded: 'One or two planes here had weak GPS. That is not enough to call it an attack yet.',
+  clear: 'GPS is working normally for the planes flying here.',
+  insufficient: 'Too few planes flew over this area to tell either way.',
+}
+
+function hexWidthKm(ring) {
+  let w = 0
+  for (const a of ring) for (const b of ring) w = Math.max(w, haversineKm(a[1], a[0], b[1], b[0]))
+  return w
+}
 
 function stateExplanation(c, cfg, windowMin) {
   const need = cfg?.min_aircraft ?? 3
@@ -86,18 +102,18 @@ function AiSummary({ h3 }) {
   }
 
   return (
-    <section className="rounded-lg border border-air-300 bg-air-50 p-3" aria-labelledby="ai-title">
+    <section className="rounded-lg border border-air-300 bg-air-50 p-3" aria-labelledby="summary-title">
       <div className="flex items-center justify-between gap-2">
-        <h3 id="ai-title" className="text-[15.5px] font-bold text-ink-900">
-          AI summary
+        <h3 id="summary-title" className="text-[15.5px] font-bold text-ink-900">
+          Summary
         </h3>
         <Button variant="primary" size="sm" onClick={draft} disabled={state.phase === 'loading'}>
-          {state.phase === 'loading' ? 'Drafting…' : state.phase === 'done' ? 'Draft again' : 'Draft AI summary'}
+          {state.phase === 'loading' ? 'Writing…' : state.phase === 'done' ? 'Write again' : 'Write summary'}
         </Button>
       </div>
       {state.phase === 'idle' ? (
         <p className="mt-1.5 text-[13.5px] leading-snug text-ink-600">
-          Turns the facts above into a short note a controller can read in ten seconds. It only rewords them; detection stays rule-based.
+          Turns the facts above into a short note anyone can read in ten seconds.
         </p>
       ) : null}
       {state.phase === 'not-built' ? (
@@ -105,17 +121,16 @@ function AiSummary({ h3 }) {
           <p className="font-semibold text-ink-900">Not connected yet.</p>
           <p className="mt-1">
             {STANDALONE ? 'This standalone build has no backend. ' : ''}The backend endpoint <code className="font-data text-[12px]">GET /api/cells/{'{h3}'}/summary</code> is still to be
-            built. When it exists, Gemini drafts the note here from this hexagon&apos;s facts, aircraft and linked incident.
+            built. When it exists, the note appears here, written from this area&apos;s facts, aircraft and linked incident.
           </p>
         </div>
       ) : null}
-      {state.phase === 'error' ? <p className="mt-2 text-[13.5px] font-semibold text-[#8F1F23]">Could not draft a summary: {state.text}</p> : null}
+      {state.phase === 'error' ? <p className="mt-2 text-[13.5px] font-semibold text-[#8F1F23]">Could not write a summary: {state.text}</p> : null}
       {state.phase === 'done' ? (
         <div className="mt-2">
           <p className="whitespace-pre-line text-[14.5px] leading-relaxed text-ink-900">{state.res?.summary || 'The backend returned an empty summary.'}</p>
           <p className="mt-1.5 text-[12px] text-ink-600">
-            AI-drafted{state.res?.model ? ` by ${state.res.model}` : ''}
-            {state.res?.generated_ts ? ` at ${istHM(state.res.generated_ts)} IST` : ''} from the facts above. Check before sharing.
+            Written{state.res?.generated_ts ? ` at ${istHM(state.res.generated_ts)} IST` : ''} from the facts above. Check before sharing.
           </p>
         </div>
       ) : null}
@@ -154,31 +169,45 @@ export default function CellDetail({ id }) {
   const incident = d.incidentsByCell.get(id)
   const heading = d.alerts.filter((a) => a.kind === 'early_warning' && a.h3 === id)
   const near = nearestAirport(c.center[0], c.center[1], haversineKm)
+  const place = describePlace(c.center[0], c.center[1], haversineKm, bearingDeg)
+  const width = Math.round(hexWidthKm(c.ring) / 10) * 10
+  const st = stateOf(c.state)
   const reasons = Object.entries(c.reasons || {}).sort((a, b) => b[1] - a[1])
   const res = tick?.h3_res ?? 3
 
   return (
     <div className="space-y-4">
       {back}
-      <header className="space-y-1.5">
+      <header className="space-y-2">
         <div className="flex flex-wrap items-center gap-2">
-          <h2 className="text-[19px] font-bold text-ink-900">Hexagon</h2>
+          <h2 className="text-[19px] font-bold text-ink-900">{place ? `Area near ${place.name}` : 'Hexagon'}</h2>
           <StateChip state={c.state} size="lg" />
           {injected ? <InjectedBadge /> : null}
         </div>
-        <p className="text-[13px] text-ink-600">
-          <span className="font-data text-ink-900">{id}</span> (H3 resolution {res})
-        </p>
-        <p className="text-[13.5px] text-ink-700">
-          Centre <span className="font-data">{fmtLatLon(c.center[0], c.center[1])}</span>
-          {near ? `, ${Math.round(near.km)} km from ${near.city} (${near.icao})` : ''}.{' '}
+        <dl className="space-y-2 rounded-lg border-2 p-3" style={{ borderColor: st.color, background: `${st.color}14` }}>
+          <div>
+            <dt className="text-[13px] font-semibold text-ink-600">Where</dt>
+            <dd className="text-[18px] font-bold leading-snug text-ink-900">{place ? place.text[0].toUpperCase() + place.text.slice(1) : fmtLatLon(c.center[0], c.center[1])}</dd>
+          </div>
+          <div>
+            <dt className="text-[13px] font-semibold text-ink-600">How big</dt>
+            <dd className="text-[15px] leading-snug text-ink-900">About {width} km from corner to corner, roughly the size of a district.</dd>
+          </div>
+          <div>
+            <dt className="text-[13px] font-semibold text-ink-600">What it means</dt>
+            <dd className="text-[15px] leading-snug text-ink-900">{PLAIN[c.state] || st.words}</dd>
+          </div>
+        </dl>
+        <p className="text-[13px] leading-snug text-ink-600">
+          Centre <span className="font-data text-ink-900">{fmtLatLon(c.center[0], c.center[1])}</span>
+          {near ? `, ${Math.round(near.km)} km from ${near.city} airport (${near.icao})` : ''}. Hexagon <span className="font-data">{id}</span>, size level {res}.{' '}
           <button type="button" className="font-semibold text-air-700 underline-offset-4 hover:underline" onClick={() => focusOn({ center: c.center, zoom: 8 })}>
             Zoom to it
           </button>
         </p>
       </header>
 
-      <p className="text-[14.5px] leading-relaxed text-ink-900">{stateExplanation(c, cfg, windowMin)}</p>
+      <p className="text-[14px] leading-relaxed text-ink-700">{stateExplanation(c, cfg, windowMin)}</p>
 
       <section aria-labelledby="facts-title">
         <h3 id="facts-title" className="text-[15.5px] font-bold text-ink-900">

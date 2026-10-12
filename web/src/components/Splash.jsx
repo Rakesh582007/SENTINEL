@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 
-// Intro: you stand at a runway threshold looking down the approach lights;
-// an airliner on final approach comes straight at you and passes overhead.
-// About 3 s, skippable (button, Enter or Esc), and static if the OS asks for
-// reduced motion. No password: a localhost demo has nothing to protect.
+// Intro: you stand at a runway threshold looking down the approach lights, an
+// airliner waiting on the horizon. "Enter dashboard" (or Enter) sends it at you
+// and over your head, then the dashboard opens. "Skip intro" (or Esc) goes
+// straight in. Reduced motion: no flight. No password: a localhost demo has
+// nothing to protect; "Log out" in the top bar brings you back here.
 
 const HORIZON = 600 // viewBox is 1600 x 900
 const FOCAL = 4500 // perspective scale, px per metre at 1 m
@@ -106,31 +107,42 @@ function Airliner() {
 }
 
 export default function Splash({ onEnter }) {
-  const [leaving, setLeaving] = useState(false)
-  const [ready, setReady] = useState(false)
+  // idle: title + button, plane waiting low on the horizon
+  // flying: the plane comes at you and passes overhead, then the dashboard opens
+  const [phase, setPhase] = useState('idle')
   const buttonRef = useRef(null)
   const reduced = useMemo(() => window.matchMedia?.('(prefers-reduced-motion: reduce)').matches, [])
 
-  const leave = () => {
-    if (leaving) return
-    setLeaving(true)
-    window.setTimeout(onEnter, reduced ? 120 : 520)
+  const fly = () => {
+    if (phase !== 'idle') return
+    if (reduced) {
+      setPhase('leaving')
+      window.setTimeout(onEnter, 150)
+      return
+    }
+    setPhase('flying')
+    window.setTimeout(() => setPhase('leaving'), 2350)
+    window.setTimeout(onEnter, 2800)
+  }
+
+  const skip = () => {
+    if (phase === 'leaving') return
+    setPhase('leaving')
+    window.setTimeout(onEnter, 150)
   }
 
   useEffect(() => {
-    const t = window.setTimeout(() => setReady(true), reduced ? 0 : 2800)
-    return () => window.clearTimeout(t)
-  }, [reduced])
-
-  useEffect(() => {
-    if (ready) buttonRef.current?.focus({ preventScroll: true })
-  }, [ready])
+    buttonRef.current?.focus({ preventScroll: true })
+  }, [])
 
   useEffect(() => {
     const onKey = (e) => {
-      if (e.key === 'Enter' || e.key === 'Escape') {
+      if (e.key === 'Enter') {
         e.preventDefault()
-        leave()
+        fly()
+      } else if (e.key === 'Escape') {
+        e.preventDefault()
+        skip()
       }
     }
     window.addEventListener('keydown', onKey)
@@ -139,7 +151,7 @@ export default function Splash({ onEnter }) {
 
   return (
     <div
-      className={`splash fixed inset-0 z-[2000] overflow-hidden bg-air-100 ${leaving ? 'splash-leaving' : ''} ${reduced ? 'splash-static' : ''}`}
+      className={`splash fixed inset-0 z-[2000] overflow-hidden bg-air-100 ${phase === 'flying' || phase === 'leaving' ? 'splash-flying' : ''} ${phase === 'leaving' ? 'splash-leaving' : ''}`}
       role="dialog"
       aria-modal="true"
       aria-label="SENTINEL intro"
@@ -179,14 +191,14 @@ export default function Splash({ onEnter }) {
 
       <button
         type="button"
-        onClick={leave}
+        onClick={skip}
         className="absolute right-4 top-4 rounded-md px-3 py-1.5 text-sm font-medium text-ink-700 underline-offset-4 hover:underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-air-600"
         style={{ top: 'calc(env(safe-area-inset-top, 0px) + 16px)' }}
       >
         Skip intro
       </button>
 
-      <div className={`splash-title absolute inset-x-0 top-[13%] flex flex-col items-center px-4 text-center ${ready ? 'is-ready' : ''}`}>
+      <div className="splash-title absolute inset-x-0 top-[13%] flex flex-col items-center px-4 text-center">
         <h1 className="font-data text-[clamp(44px,8vw,96px)] font-bold leading-none tracking-[0.22em] text-ink-900 [text-wrap:balance]" style={{ marginRight: '-0.22em' }}>
           SENTINEL
         </h1>
@@ -197,9 +209,9 @@ export default function Splash({ onEnter }) {
         <button
           ref={buttonRef}
           type="button"
-          onClick={leave}
-          disabled={!ready}
-          className="mt-7 rounded-lg bg-air-600 px-7 py-3 text-lg font-semibold text-white shadow-float transition-colors hover:bg-air-700 focus-visible:outline focus-visible:outline-[3px] focus-visible:outline-offset-2 focus-visible:outline-air-800 disabled:opacity-0"
+          onClick={fly}
+          disabled={phase !== 'idle'}
+          className="mt-7 rounded-lg bg-air-600 px-7 py-3 text-lg font-semibold text-white shadow-float transition-colors hover:bg-air-700 focus-visible:outline focus-visible:outline-[3px] focus-visible:outline-offset-2 focus-visible:outline-air-800"
         >
           Enter dashboard
         </button>

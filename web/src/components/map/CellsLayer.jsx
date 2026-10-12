@@ -1,7 +1,8 @@
 import L from 'leaflet'
 import { memo, useMemo, useState } from 'react'
 import { Marker, Pane, Polygon, Tooltip, useMap, useMapEvents } from 'react-leaflet'
-import { ringToLatLngs } from '../../lib/geo.js'
+import { describePlace } from '../../data/places.js'
+import { bearingDeg, haversineKm, ringToLatLngs } from '../../lib/geo.js'
 import { stateOf } from '../../lib/states.js'
 import { useDerived, useStore } from '../../store.js'
 
@@ -52,6 +53,8 @@ const CellPolygon = memo(function CellPolygon({ cell, selected, onPick }) {
   return (
     <Polygon positions={latLngsOf(cell.id, cell.ring)} pathOptions={styleFor(cell.state, selected)} eventHandlers={handlers}>
       <Tooltip sticky className="st-tip" direction="top" offset={[0, -8]}>
+        <span className="font-semibold">{describePlace(cell.center[0], cell.center[1], haversineKm, bearingDeg)?.text.replace(/^./, (x) => x.toUpperCase())}</span>
+        <br />
         {cellSentence(cell)}. Click for details.
       </Tooltip>
     </Polygon>

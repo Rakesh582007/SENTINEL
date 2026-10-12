@@ -17,7 +17,7 @@ export default function AirspacePanel() {
     <div className="space-y-6 p-4">
       <AlertsPanel />
       <IncidentsPanel />
-      <p className="text-[12.5px] leading-snug text-ink-600">Click any hexagon on the map for its facts, aircraft, incident and an AI summary.</p>
+      <p className="text-[12.5px] leading-snug text-ink-600">Click any hexagon on the map to see where it is, what it means, its aircraft and a summary.</p>
     </div>
   )
 }

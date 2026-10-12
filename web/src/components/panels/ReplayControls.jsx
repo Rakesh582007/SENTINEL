@@ -19,8 +19,11 @@ function PlayIcon({ paused }) {
   )
 }
 
-function Replay({ r }) {
+function Replay({ r: tickReplay }) {
   const toast = useStore((s) => s.toast)
+  const override = useStore((s) => s.replayOverride)
+  const setReplayOverride = useStore((s) => s.setReplayOverride)
+  const r = { ...tickReplay, ...(override || {}) }
   const elapsed = useDataElapsed()
   const [drag, setDrag] = useState(null) // scrubber value while the pointer is down
   const [busy, setBusy] = useState(false)
@@ -33,6 +36,7 @@ function Replay({ r }) {
       await fn()
       if (ok) toast(ok, 'ok')
     } catch (e) {
+      setReplayOverride(null)
       toast(errorText(e), 'error')
     } finally {
       setBusy(false)
@@ -49,8 +53,11 @@ function Replay({ r }) {
     <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
       <button
         type="button"
-        onClick={() => call(() => (r.paused ? api.play() : api.pause()))}
-        disabled={busy}
+        onClick={() => {
+          const paused = !r.paused
+          setReplayOverride({ paused })
+          call(() => (paused ? api.pause() : api.play()))
+        }}
         className="inline-flex items-center gap-1.5 rounded-md bg-air-600 px-3 py-1.5 text-[13.5px] font-semibold text-white hover:bg-air-700 disabled:opacity-60"
         aria-label={r.paused ? 'Play replay' : 'Pause replay'}
       >
@@ -63,7 +70,11 @@ function Replay({ r }) {
             key={sp}
             type="button"
             aria-pressed={r.speed === sp}
-            onClick={() => r.speed !== sp && call(() => api.speed(sp))}
+            onClick={() => {
+              if (r.speed === sp) return
+              setReplayOverride({ speed: sp })
+              call(() => api.speed(sp))
+            }}
             className={`px-2 py-1 font-data text-[12.5px] ${r.speed === sp ? 'bg-air-600 text-white' : 'bg-sand-50 text-ink-700 hover:bg-air-50'}`}
           >
             {sp}×

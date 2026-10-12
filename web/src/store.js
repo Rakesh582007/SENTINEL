@@ -10,11 +10,22 @@ export const useStore = create((set, get) => ({
   tick: null,
   tickRecvAt: 0, // performance.now() when the tick arrived (drives countdowns between ticks)
   connection: { state: 'connecting', attempt: 0, retryAt: null },
-  setTick: (tick) => set({ tick, tickRecvAt: performance.now() }),
+  setTick: (tick) =>
+    set((s) => {
+      // Drop an optimistic replay setting once the backend's tick agrees with it.
+      let replayOverride = s.replayOverride
+      const r = tick?.replay
+      if (replayOverride && r && (replayOverride.speed == null || r.speed === replayOverride.speed) && (replayOverride.paused == null || r.paused === replayOverride.paused))
+        replayOverride = null
+      return { tick, tickRecvAt: performance.now(), replayOverride }
+    }),
+  // Speed / pause the user just clicked, shown at once instead of waiting up to 5 s for the next tick.
+  replayOverride: null,
+  setReplayOverride: (patch) => set((s) => ({ replayOverride: patch ? { ...(s.replayOverride || {}), ...patch } : null })),
   setConnection: (connection) => set({ connection }),
 
   // ---------------------------------------------------------------- navigation
-  tab: 'airspace', // airspace | simulator | sentinel
+  tab: 'home', // home | airspace | simulator | sentinel
   setTab: (tab) => set({ tab, picking: false }),
   selection: null, // { kind: 'cell' | 'aircraft', id }
   select: (kind, id) => set({ selection: kind && id ? { kind, id } : null }),

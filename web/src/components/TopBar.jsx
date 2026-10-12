@@ -149,7 +149,7 @@ function Connection() {
   )
 }
 
-export default function TopBar() {
+export default function TopBar({ onLogout }) {
   const elapsed = useDataElapsed()
   const tab = useStore((s) => s.tab)
   const setTab = useStore((s) => s.setTab)
@@ -157,7 +157,7 @@ export default function TopBar() {
   const setEvaluationOpen = useStore((s) => s.setEvaluationOpen)
 
   const onTabKey = (e) => {
-    const i = TABS.findIndex((t) => t.id === tab)
+    const i = Math.max(0, TABS.findIndex((t) => t.id === tab))
     if (e.key === 'ArrowRight' || e.key === 'ArrowLeft') {
       e.preventDefault()
       const next = TABS[(i + (e.key === 'ArrowRight' ? 1 : TABS.length - 1)) % TABS.length]
@@ -168,10 +168,16 @@ export default function TopBar() {
 
   return (
     <header className="relative z-[1100] flex flex-wrap items-center gap-x-6 gap-y-1 border-b border-air-300 bg-air-100 px-4 py-1.5">
-      <div className="flex items-baseline gap-2.5 py-1">
+      <button
+        type="button"
+        onClick={() => setTab('home')}
+        className="flex items-baseline gap-2.5 rounded-md py-1 text-left hover:opacity-80"
+        title="Back to the main dashboard"
+        aria-label="SENTINEL, back to the main dashboard"
+      >
         <span className="font-data text-[19px] font-bold tracking-[0.18em] text-ink-900">SENTINEL</span>
         <span className="hidden text-[14px] text-ink-600 sm:inline">GPS Attack Watch</span>
-      </div>
+      </button>
 
       <nav className="-mb-1.5 flex max-w-full self-stretch overflow-x-auto" role="tablist" aria-label="Sections" onKeyDown={onTabKey}>
         {TABS.map((t) => {
@@ -216,6 +222,13 @@ export default function TopBar() {
           className="rounded-md border border-air-600 px-3 py-1 text-[14px] font-semibold text-air-700 hover:bg-air-50"
         >
           Evaluation
+        </button>
+        <button
+          type="button"
+          onClick={onLogout}
+          className="rounded-md px-2.5 py-1 text-[14px] font-semibold text-ink-700 hover:bg-air-50 hover:text-ink-900"
+        >
+          Log out
         </button>
       </div>
     </header>
