@@ -1,6 +1,7 @@
 """API smoke tests. GAW_AUTOSTART=false (conftest), so no network and no background tasks."""
 import asyncio
 import inspect
+import json
 import threading
 import time
 
@@ -128,6 +129,31 @@ def test_scenarios_list_and_run(client):
     rt.compute_tick()
     assert client.get("/api/scenarios").json()["running"]["fired"][0].startswith("jam-")
     assert client.post("/api/scenarios/nope/run").status_code == 404
+
+
+def test_bad_scenario_files_get_422_with_a_clear_message(tmp_path, client, monkeypatch):
+    """Audit N8: a broken file was a 500; a missing at_offset_s a misleading 404."""
+    monkeypatch.setattr(settings, "scenarios_dir", tmp_path)
+    jam = {"kind": "jamming", "center": [28.47, 77.2]}
+    files = {
+        "broken": "{not json",
+        "nooffset": json.dumps({"id": "nooffset", "events": [{"attack": jam}]}),
+        "badattack": json.dumps({"id": "badattack", "events": [{"at_offset_s": 0, "attack": {**jam, "radius_km": 1000}}]}),
+        "good": json.dumps({"id": "good", "events": [{"at_offset_s": 5, "attack": jam}]}),
+    }
+    for name, text in files.items():
+        (tmp_path / f"{name}.json").write_text(text, encoding="utf-8")
+    seed(client)
+    r = client.post("/api/scenarios/broken/run")
+    assert r.status_code == 422 and "broken.json is not valid" in r.json()["detail"]
+    r = client.post("/api/scenarios/nooffset/run")
+    assert r.status_code == 422 and "event 1: missing at_offset_s" in r.json()["detail"]
+    r = client.post("/api/scenarios/badattack/run")
+    assert r.status_code == 422 and "radius_km" in r.json()["detail"]
+    assert client.get("/api/scenarios").json()["running"] is None  # nothing was scheduled
+    assert client.post("/api/scenarios/good/run").json()["remaining"] == 1  # other broken files don't block it
+    r = client.post("/api/scenarios/nope/run")
+    assert r.status_code == 404 and "broken.json" in r.json()["detail"]
 
 
 def test_sentinel_post_and_latest(client):

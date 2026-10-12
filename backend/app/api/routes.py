@@ -269,7 +269,9 @@ async def run_scenario(scenario_id: str, request: Request):
     try:
         return rt_of(request).start_scenario(scenario_id)
     except KeyError as e:
-        raise HTTPException(404, str(e)) from e
+        raise HTTPException(404, e.args[0] if e.args else str(e)) from e
+    except ValueError as e:  # broken file or invalid event: nothing was scheduled
+        raise HTTPException(422, str(e)) from e
 
 
 # ---------------------------------------------------------------- ground sentinel

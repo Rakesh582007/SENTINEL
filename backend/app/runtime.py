@@ -15,11 +15,13 @@ import asyncio
 import functools
 import json
 import logging
+import math
 import random
 import time
 from pathlib import Path
 
 import h3
+from pydantic import TypeAdapter, ValidationError
 
 from app.clock import Clock
 from app.config import Settings, get_detection
@@ -35,6 +37,7 @@ from app.ingest.poller import LivePoller
 from app.ingest.recording import append_line, make_line, new_run_id
 from app.ingest.replay import Replayer, choose_files
 from app.ingest.sources import ATTRIBUTION
+from app.models import AttackIn
 from app.records import Record
 from app.regions import REGIONS, QueryPoint, get_region, parse_points
 from app.sentinel import SentinelStore
@@ -43,6 +46,25 @@ from app.state import Window
 log = logging.getLogger("gaw.runtime")
 
 ALARM_STATES = ("jammed", "spoofing")
+ATTACK_BODY = TypeAdapter(AttackIn)
+
+
+def scenario_event(n: int, event) -> tuple[float, dict]:
+    """One scenario event -> (at_offset_s, a validated POST /api/attacks body). ValueError with a
+    message that says which event and what is wrong."""
+    if not isinstance(event, dict):
+        raise ValueError(f"event {n}: must be an object with at_offset_s and attack")
+    off = event.get("at_offset_s")
+    if off is None:
+        raise ValueError(f"event {n}: missing at_offset_s (seconds of replay time after the scenario starts)")
+    if isinstance(off, bool) or not isinstance(off, (int, float)) or not math.isfinite(off) or off < 0:
+        raise ValueError(f"event {n}: at_offset_s must be a number >= 0, got {off!r}")
+    try:
+        attack = ATTACK_BODY.validate_python(event.get("attack"))
+    except ValidationError as e:
+        problems = "; ".join(f"{'.'.join(str(x) for x in err['loc']) or 'attack'}: {err['msg']}" for err in e.errors())
+        raise ValueError(f"event {n}: invalid attack ({problems})") from None
+    return float(off), attack.model_dump()
 
 
 class Runtime:
@@ -273,14 +295,30 @@ class Runtime:
         return out
 
     def start_scenario(self, scenario_id: str) -> dict:
-        for p in Path(self.settings.scenarios_dir).glob("*.json"):
-            d = json.loads(p.read_text(encoding="utf-8"))
+        """Schedule a scenario's events. KeyError: no such scenario. ValueError: the file or one of
+        its events is invalid (nothing is scheduled then)."""
+        unreadable = []
+        for p in sorted(Path(self.settings.scenarios_dir).glob("*.json")):
+            try:
+                d = json.loads(p.read_text(encoding="utf-8"))
+                if not isinstance(d, dict):
+                    raise ValueError("the top level must be a JSON object")
+            except (OSError, ValueError) as e:
+                if p.stem == scenario_id:
+                    raise ValueError(f"scenario file {p.name} is not valid: {e}") from None
+                unreadable.append(p.name)
+                continue
             if d.get("id", p.stem) == scenario_id:
+                events = d.get("events", [])
+                if not isinstance(events, list):
+                    raise ValueError(f"scenario {scenario_id!r}: 'events' must be a list")
                 now = self.clock.now()
-                pending = sorted(((now + float(e["at_offset_s"]), e["attack"]) for e in d.get("events", [])), key=lambda x: x[0])
+                pending = sorted(((now + off, body) for off, body in
+                                  (scenario_event(n, e) for n, e in enumerate(events, 1))), key=lambda x: x[0])
                 self.scenario = {"id": scenario_id, "start_ts": now, "pending": pending, "fired": []}
                 return self.scenario_status()
-        raise KeyError(f"no scenario {scenario_id!r}")
+        hint = f" (unreadable scenario files: {', '.join(unreadable)})" if unreadable else ""
+        raise KeyError(f"no scenario {scenario_id!r}{hint}")
 
     def scenario_status(self) -> dict | None:
         if not self.scenario:
