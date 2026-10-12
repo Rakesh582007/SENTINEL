@@ -314,3 +314,28 @@ input[type='range'] {
 input[type='range'].signal {
   accent-color: var(--signal);
 }
+
+/* Per-satellite slider: the filled part takes the Strong / Medium / Weak colour. */
+input[type='range'].sat-slider {
+  -webkit-appearance: none;
+  appearance: none;
+  height: 14px;
+  border-radius: 3px;
+  cursor: pointer;
+  background: linear-gradient(to right, var(--fill) var(--pct), #E7DFCF var(--pct));
+}
+input[type='range'].sat-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 8px;
+  height: 22px;
+  border-radius: 3px;
+  background: #13294B;
+  border: 1px solid #fff;
+}
+input[type='range'].sat-slider::-moz-range-thumb {
+  width: 8px;
+  height: 22px;
+  border-radius: 3px;
+  background: #13294B;
+  border: 1px solid #fff;
+}

@@ -1,6 +1,5 @@
 import { useEffect, useState } from 'react'
 import { api } from './api/client.js'
-import { STANDALONE } from './config.js'
 import { useLiveFeed } from './api/useLiveFeed.js'
 import EvaluationModal from './components/EvaluationModal.jsx'
 import HomeView from './components/HomeView.jsx'
@@ -73,12 +72,6 @@ export default function App() {
 
   return (
     <div className="flex min-h-full flex-col lg:h-full">
-      {STANDALONE ? (
-        <p className="bg-ink-900 px-4 py-1 text-[12.5px] leading-snug text-white" role="note">
-          Standalone preview. The backend runs in your browser and replays the real 19-minute sample from 11 Oct with the same detection rules. The Ground Sentinel is simulated;
-          PDF reports, live data and the summary need the real backend.
-        </p>
-      ) : null}
       <TopBar onLogout={logout} />
       <main className="relative flex min-h-0 flex-1 flex-col lg:flex-row" id={`panel-${tab}`} role="tabpanel" aria-labelledby={`tab-${tab}`}>
         <section className="relative lg:min-h-0 lg:flex-1" aria-label="Map" hidden={!mapTab}>

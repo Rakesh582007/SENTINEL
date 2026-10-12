@@ -72,7 +72,7 @@ export default function HomeView() {
       <div className="mx-auto max-w-6xl px-4 py-8 lg:py-12">
         <h1 className="text-[28px] font-bold text-ink-900">Main dashboard</h1>
         <p className="mt-1 max-w-2xl text-[16px] leading-relaxed text-ink-700">
-          Pick a section. Click <span className="font-data font-bold tracking-[0.12em]">SENTINEL</span> at the top left any time to come back here.
+          Pick a section.
         </p>
         <div className="mt-6 grid gap-5 md:grid-cols-3">
           <Card

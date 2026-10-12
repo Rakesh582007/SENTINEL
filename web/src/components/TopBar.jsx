@@ -1,5 +1,3 @@
-import { useEffect, useRef, useState } from 'react'
-import { api, errorText } from '../api/client.js'
 import { STALE_AFTER_S } from '../config.js'
 import { sentinelOf } from '../lib/states.js'
 import { istTime, istDay } from '../lib/time.js'
@@ -39,88 +37,6 @@ function TabHint({ id }) {
       <span className="inline-block h-2 w-2 rounded-full" style={{ background: s.color }} aria-hidden="true" />
       {s.label}
     </span>
-  )
-}
-
-function ModeSwitch() {
-  const tick = useStore((s) => s.tick)
-  const toast = useStore((s) => s.toast)
-  const [asking, setAsking] = useState(null) // target mode awaiting confirmation
-  const [busy, setBusy] = useState(false)
-  const boxRef = useRef(null)
-  const mode = tick?.mode
-
-  useEffect(() => {
-    if (!asking) return
-    const onDown = (e) => {
-      if (boxRef.current && !boxRef.current.contains(e.target)) setAsking(null)
-    }
-    const onKey = (e) => e.key === 'Escape' && setAsking(null)
-    window.addEventListener('pointerdown', onDown)
-    window.addEventListener('keydown', onKey)
-    return () => {
-      window.removeEventListener('pointerdown', onDown)
-      window.removeEventListener('keydown', onKey)
-    }
-  }, [asking])
-
-  const switchTo = async (target) => {
-    setBusy(true)
-    try {
-      await api.setMode(target)
-      toast(target === 'live' ? 'Switched to live data. Attacks and incidents were cleared.' : 'Switched to replay. Attacks and incidents were cleared.', 'ok')
-    } catch (e) {
-      toast(`Could not switch mode: ${errorText(e)}`, 'error')
-    } finally {
-      setBusy(false)
-      setAsking(null)
-    }
-  }
-
-  return (
-    <div className="relative" ref={boxRef}>
-      <div className="flex rounded-md border border-air-300 bg-air-50 p-0.5" role="group" aria-label="Data source">
-        {['replay', 'live'].map((m) => {
-          const active = mode === m
-          return (
-            <button
-              key={m}
-              type="button"
-              aria-pressed={active}
-              disabled={!tick || busy}
-              onClick={() => !active && setAsking(m)}
-              className={`rounded px-2.5 py-0.5 text-[13px] font-semibold transition-colors ${
-                active ? 'bg-air-600 text-white' : 'text-ink-700 hover:bg-air-100'
-              } disabled:opacity-60`}
-            >
-              {m === 'replay' ? 'Replay' : 'Live'}
-            </button>
-          )
-        })}
-      </div>
-      {asking ? (
-        <div className="absolute right-0 top-full z-[1200] mt-2 w-72 rounded-lg border border-sand-400 bg-sand-50 p-3 shadow-float" role="dialog" aria-label="Confirm mode switch">
-          <p className="text-[14px] leading-snug text-ink-900">
-            {asking === 'live'
-              ? 'Switch to live data from adsb.fi and adsb.lol? This clears simulated attacks and incidents.'
-              : 'Switch to the recorded replay? This clears simulated attacks and incidents.'}
-          </p>
-          <div className="mt-3 flex justify-end gap-2">
-            <button type="button" className="rounded-md px-3 py-1 text-[14px] font-semibold text-ink-700 hover:bg-air-50" onClick={() => setAsking(null)}>
-              Cancel
-            </button>
-            <button
-              type="button"
-              className="rounded-md bg-air-600 px-3 py-1 text-[14px] font-semibold text-white hover:bg-air-700 disabled:opacity-60"
-              disabled={busy}
-              onClick={() => switchTo(asking)}
-            >
-              {busy ? 'Switching…' : asking === 'live' ? 'Switch to live' : 'Switch to replay'}
-            </button>
-          </div>
-        </div>
-      ) : null}
-    </div>
   )
 }
 
@@ -204,7 +120,6 @@ export default function TopBar({ onLogout }) {
       </nav>
 
       <div className="ml-auto flex flex-wrap items-center gap-x-4 gap-y-1">
-        <ModeSwitch />
         <div className="leading-tight" title={tick ? `${istDay(tick.ts)}, data time in IST` : undefined}>
           <div className="font-data text-[15px] text-ink-900 tnum">
             {istTime(tick ? tick.ts + elapsed : null)} <span className="text-[11px] text-ink-600">IST</span>

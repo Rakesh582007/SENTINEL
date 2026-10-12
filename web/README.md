@@ -65,3 +65,9 @@ Give the model only the facts the UI already shows (cell stats, reasons, aircraf
 5. Detections are logged on state changes only: removing and re-creating a jammer within one 5 s tick leaves no new "entered jammed" event.
 6. Evaluation coverage reads current attacks only, so a removed jammer loses `max_aircraft_inside`.
 7. `scenarios/demo1.json` still says the scenario runner is TODO; it works.
+
+## Ground sentinel: Live and Attack
+
+- **Live** reads the real box through the backend (`tick.sentinel`, `GET /api/sentinel/history`). Bars are green (35 dB-Hz or more), yellow (28 to 35) or red (under 28), always with the word Strong / Medium / Weak.
+- Satellite names (GPS G12, Galileo E11, ...) need the firmware to add `sat_ids` next to `snr_list`: either strings like `"G12"` or NMEA PRN numbers (1-32 GPS, 65-96 GLONASS, 201-237 BeiDou, 301-336 Galileo), same order as `snr_list`. The backend keeps extra fields (`extra="allow"`). Without it the bars are numbered "Satellite 1..N".
+- **Attack** is a browser-only simulator (`simStore.js`): per-satellite dB sliders, same rules as `backend/app/sentinel.py` (10 dB under normal, or fix lost for more than 5 s). A fix needs 4 satellites above 20 dB-Hz (our assumption). Nothing is sent to the backend; everything is tagged INJECTED TEST ATTACK. Spoofing is not simulated there.

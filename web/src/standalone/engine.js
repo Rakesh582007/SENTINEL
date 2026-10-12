@@ -535,6 +535,7 @@ class FakeBox {
         hdop: covered ? 3.4 : 0.9,
         status: covered ? 'JAMMING' : 'OK',
         snr_list: snr,
+        sat_ids: ['G05', 'G12', 'G25', 'E11', 'E24', 'R07', 'R18', 'C21', 'C34'], // optional extra the real firmware can add
       },
       t,
     )
