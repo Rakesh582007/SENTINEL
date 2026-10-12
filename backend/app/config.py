@@ -69,6 +69,9 @@ class Settings(BaseSettings):
     # JAMMING: average satellite signal below this many dB-Hz (fixed level, not relative to the baseline;
     # a lost fix alone is not jamming). Open sky reads ~35-45, indoors ~25-30, foil over the antenna < 20.
     sentinel_jam_snr_db: float = Field(22.0, gt=0.0, le=60.0)
+    # ...and it must stay below that level this many seconds in a row before JAMMING shows (a one-packet dip
+    # indoors is noise: 13 Oct chart dipped under 22 for single samples). 0 = react to the first packet.
+    sentinel_jam_hold_s: float = Field(6.0, ge=0.0, le=60.0)
     sentinel_move_m: float = Field(50.0, gt=0.0)  # SPOOF: the fixed box "moves" this far from its reference
     sentinel_alt_jump_m: float = Field(100.0, gt=0.0)  # SPOOF: its altitude jumps this much
 

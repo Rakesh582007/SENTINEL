@@ -9,7 +9,7 @@ import { ago, istTime } from '../../lib/time.js'
 import { useStore } from '../../store.js'
 import { Button, Fact, InjectedBadge, useNow } from '../ui.jsx'
 import LineChart from './LineChart.jsx'
-import { baseValues, JAM_SNR_DB, SIM_BASELINE, SIM_ID, useSim } from './simStore.js'
+import { baseValues, JAM_HOLD_S, JAM_SNR_DB, SIM_BASELINE, SIM_ID, useSim } from './simStore.js'
 
 const WINDOW_S = 300
 
@@ -234,7 +234,7 @@ function AttackControls() {
       </div>
       <p className="text-[13.5px] leading-snug text-ink-700">
         Drag any satellite&apos;s signal below, or lower them all at once. The status uses the server&apos;s rule: an average signal below {JAM_SNR_DB} dB-Hz reads as
-        jamming (normal here is {SIM_BASELINE.toFixed(1)}); anything above is normal, even without a fix. Nothing is sent to the real box or the backend.
+        jamming (normal here is {SIM_BASELINE.toFixed(1)}); it must stay there for {JAM_HOLD_S} seconds; anything above is normal, even without a fix. Nothing is sent to the real box or the backend.
       </p>
       <div>
         <div className="flex items-baseline justify-between">
@@ -297,6 +297,12 @@ function Body({ box, rows, events, simulated, entries, onSatChange, controls, no
           ) : null}
         </section>
 
+        {!simulated && !box.rule && box.server_status !== 'OFFLINE' ? (
+          <p role="alert" className="rounded-lg border-2 border-[#E8A33C] bg-[#FFF6E5] px-3 py-2 text-[13.5px] font-semibold leading-snug text-ink-900">
+            The backend is running an old copy of the Sentinel rules, so this status can be wrong. Stop uvicorn and start it again (no --reload), then refresh this page.
+          </p>
+        ) : null}
+
         {controls}
 
         <dl className="rounded-lg border border-sand-400 bg-sand-50 px-3 py-1">
@@ -321,7 +327,7 @@ function Body({ box, rows, events, simulated, entries, onSatChange, controls, no
         <p className="text-[14px] leading-relaxed text-ink-700">
           {simulated
             ? 'This is a stand-in for the real box, so the rules can be shown without hardware. Switch to Live to see the real one.'
-            : `The box learns its normal satellite signal in its first two minutes with a fix. An average signal below ${JAM_SNR_DB} dB-Hz reads as jamming (above it is normal, even if the fix drops); a fixed box that appears to move reads as spoofing. It shows the method on a table; at border airports it would cover the gaps where too few aircraft fly.`}
+            : `The box learns its normal satellite signal in its first two minutes with a fix. An average signal below ${JAM_SNR_DB} dB-Hz for ${JAM_HOLD_S} seconds in a row reads as jamming (above it is normal, even if the fix drops); a fixed box that appears to move reads as spoofing. It shows the method on a table; at border airports it would cover the gaps where too few aircraft fly.`}
         </p>
         {notice}
       </div>
