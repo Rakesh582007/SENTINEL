@@ -48,11 +48,16 @@ def evaluate(ground_truth: list[dict], detections: list[dict], cfg: DetectionCon
         start, window_end = ev["start_ts"], ev["start_ts"] + cfg.eval_detect_within_s
         hit = None
         if ev["kind"] == "jamming":
+            # Injected records stay in the window for jam_window_s after the event ends.
+            active_until = (ev["end_ts"] if ev["end_ts"] is not None else now) + cfg.jam_window_s
             for i, d in enumerate(detections):
-                if d["state"] == "jammed" and start - SLACK_S <= d["ts"] <= window_end and _cell_overlaps(d["h3"], ev["center"], ev["radius_km"]):
-                    hit = d
+                if d["state"] != "jammed" or not _cell_overlaps(d["h3"], ev["center"], ev["radius_km"]):
+                    continue
+                if hit is None and start - SLACK_S <= d["ts"] <= window_end:
+                    hit = d  # the first (earliest) cell to go red: time to detect
                     used.add(i)
-                    break
+                elif start - SLACK_S <= d["ts"] <= active_until and (d.get("injected") or d.get("n_injected")):
+                    used.add(i)  # more cells of the same simulated jammer are explained, not "unexplained"
         else:
             for f in flag_log:
                 if f["hex"] == ev["hex"] and start - SLACK_S <= f["ts"] <= window_end and SPOOF_REASONS.intersection(f["reasons"]):

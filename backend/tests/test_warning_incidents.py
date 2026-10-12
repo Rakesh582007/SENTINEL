@@ -68,3 +68,15 @@ def test_evaluation_counts_detected_undetectable_and_unexplained():
     assert (out["detected"], out["undetectable"], out["missed"]) == (2, 1, 0)
     assert out["unexplained_alarms"] == 1 and out["unexplained_real_data"] == 1
     assert out["median_time_to_detect_s"] == 22.5
+
+
+def test_more_cells_of_the_same_jammer_are_explained_but_real_ones_nearby_are_not():
+    gt = [{"attack_id": "jam-1", "kind": "jamming", "start_ts": 100, "end_ts": None, "center": JAM, "radius_km": 150, "hex": None}]
+    neighbour = h3.grid_disk(CELL, 1)[1]
+    detections = [
+        {"ts": 130, "h3": CELL, "state": "jammed", "n_injected": 5, "injected": True},
+        {"ts": 700, "h3": neighbour, "state": "jammed", "n_injected": 3, "injected": True},  # later, same jammer
+        {"ts": 800, "h3": neighbour, "state": "jammed", "n_injected": 0, "injected": False},  # real interference
+    ]
+    out = evaluate(gt, detections, CFG, now=1000, coverage={}, flag_log=[])
+    assert (out["detected"], out["unexplained_alarms"], out["unexplained_real_data"]) == (1, 1, 1)

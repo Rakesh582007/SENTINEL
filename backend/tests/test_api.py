@@ -350,6 +350,18 @@ def test_missed_jammer_stays_missed_after_delete(client):
     assert outcomes(client) == [(first, "missed", 20), (second, "missed", 20)]
 
 
+def test_one_jammer_over_several_cells_is_one_detection_and_no_unexplained_alarms(client):
+    """Audit S6: the extra cells of one big jammer used to count as unexplained alarms."""
+    rt = client.app.state.rt
+    spread = [make(f"{i:06x}", 31.0 + (i % 40) * 0.03, 74.0 + (i // 40) * 0.6) for i in range(160)]
+    client.post("/api/attacks", json={"kind": "jamming", "center": [31.6, 74.9], "radius_km": 150, "strength": 1.0})
+    rt.ingest_records(spread, now=POLL_TS)
+    t = rt.compute_tick()
+    assert sum(f["properties"]["state"] == "jammed" for f in t["cells"]["features"]) >= 3
+    ev = client.get("/api/evaluation").json()
+    assert (ev["events"], ev["detected"], ev["unexplained_alarms"]) == (1, 1, 0)
+
+
 def test_unknown_ids_are_404_not_500(client):
     assert client.patch("/api/attacks/jam-999", json={"strength": 0.5}).status_code == 404
     assert client.delete("/api/attacks/jam-999").status_code == 404
