@@ -687,3 +687,39 @@ def test_replay_starts_in_longest_stretch_not_in_a_gap(tmp_path, client, real_am
     rep.load()
     assert len(rep.segments()) == 2
     assert later <= rep.default_start() <= later + 290
+
+
+def test_live_airspace_view_never_shows_a_simulated_jammer(tmp_path, client, real_amritsar):
+    """The Attack Simulator injects into the shared traffic; Live airspace (tick["real"]) must not see it."""
+    rt = client.app.state.rt
+    rep = replay_of(tmp_path, rt, real_amritsar)
+    rep.seek(rep.t_start + 60)
+    client.post("/api/attacks", json={"kind": "jamming", "center": DELHI, "radius_km": 60, "strength": 1.0})
+    advance(rep, 60)
+    t = rt.compute_tick()
+    assert any(f["properties"]["state"] == "jammed" for f in t["cells"]["features"])  # simulator view
+    real = t["real"]
+    assert not any(f["properties"]["state"] in ("jammed", "spoofing") and f["properties"]["n_injected"]
+                   for f in real["cells"]["features"])
+    assert not any(a["injected"] for a in real["aircraft"])
+    assert not any(i["injected"] for i in real["incidents_summary"])
+    assert client.get("/api/incidents?view=real").json() == real["incidents_summary"]
+    sim_ids = {i["id"] for i in client.get("/api/incidents").json()}
+    assert sim_ids and all(i.startswith("inc-") for i in sim_ids)
+
+
+def test_replaying_an_incident_continues_it_instead_of_opening_a_copy(tmp_path, client, real_amritsar):
+    """Clicking an incident seeks the replay to it; the re-detection must reuse the incident."""
+    rt = client.app.state.rt
+    rep = replay_of(tmp_path, rt, real_amritsar)
+    rep.seek(rep.t_start + 60)
+    client.post("/api/attacks", json={"kind": "jamming", "center": DELHI, "radius_km": 60, "strength": 1.0})
+    advance(rep, 60)
+    rt.compute_tick()
+    [inc] = client.get("/api/incidents").json()
+    rep.seek(inc["opened_ts"] - 30)
+    advance(rep, 60)
+    rt.compute_tick()
+    [again] = client.get("/api/incidents").json()
+    assert again["id"] == inc["id"] and again["open"] and again["opened_ts"] == inc["opened_ts"]
+    assert client.get(f"/api/incidents/{inc['id']}/report.pdf").status_code == 200

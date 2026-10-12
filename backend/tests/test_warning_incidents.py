@@ -58,10 +58,10 @@ def test_pdf_summary_is_worded_by_aircraft_count_and_hemispheres_follow_the_sign
     base = {"id": "inc-x", "kind": "spoofing", "opened_ts": 1000.0, "closed_ts": None, "cells": [CELL],
             "est_lat": None, "est_lon": None, "est_radius_km": None, "max_frac_bad": 0.0}
     one = summary_text({**base, "n_aircraft": 1})
-    assert "a single aircraft" in one and "several independent" not in one and "area above" not in one
+    assert "a single aircraft" in one and "several independent" not in one and "area given under Where" not in one
     assert "3 aircraft" in summary_text({**base, "n_aircraft": 3}) and "several independent" in summary_text({**base, "n_aircraft": 3})
     assert "no individual aircraft" in summary_text({**base, "n_aircraft": 0})
-    assert "area above" in summary_text({**base, "kind": "jamming", "n_aircraft": 3, "est_lat": 31.6, "est_lon": 74.9})
+    assert "area given under Where" in summary_text({**base, "kind": "jamming", "n_aircraft": 3, "est_lat": 31.6, "est_lon": 74.9})
     assert latlon_text(31.6, 74.9) == "31.600 N, 74.900 E"
     assert latlon_text(-33.87, -70.65) == "33.870 S, 70.650 W"
     pdf = incident_pdf({**base, "n_aircraft": 1, "aircraft": [{"hex": "abc123", "flight": "X1", "first_bad_ts": 1000.0,
