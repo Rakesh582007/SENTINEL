@@ -272,20 +272,26 @@ def test_replay_survives_an_error_and_reports_it(tmp_path, client, real_amritsar
     assert "boom" in client.get("/api/health").json()["last_error"]
 
 
-def test_live_poller_survives_an_error_and_reports_it(client, real_amritsar, monkeypatch):
-    rt = client.app.state.rt
-    poller = LivePoller(rt)
+def fake_http(snapshot):
+    """An httpx-like client whose every GET answers 200 with `snapshot`."""
 
     class Answer:
         status_code = 200
 
         def json(self):
-            return real_amritsar
+            return snapshot
 
     class FakeHttp:
         async def get(self, url):
             return Answer()
 
+    return FakeHttp
+
+
+def test_live_poller_survives_an_error_and_reports_it(client, real_amritsar, monkeypatch):
+    rt = client.app.state.rt
+    poller = LivePoller(rt)
+    FakeHttp = fake_http(real_amritsar)
     real_on_answer, calls = rt.on_live_answer, []
 
     def on_answer_failing_once(*args):
@@ -524,6 +530,14 @@ def test_patch_spoof_hex_random_picks_a_real_aircraft(client):
     seed(client)
     r = client.patch(f"/api/attacks/{aid}", json={"hex": "random"})
     assert r.status_code == 200 and r.json()["hex"] in {f"{i:06x}" for i in range(12)}  # used to store "random"
+
+
+def test_live_answers_are_stamped_with_the_runtime_clock(client, real_amritsar):
+    """Audit N7: the poller used time.time() instead of the one clock."""
+    rt = client.app.state.rt
+    rt.clock.use_replay(POLL_TS + 123)  # stands in for "now"; live mode reads the wall clock through it
+    assert asyncio.run(LivePoller(rt).poll_guarded(fake_http(real_amritsar)(), rt.points[0], "adsb.fi"))
+    assert {r.poll_ts for r in rt.window.all()} == {POLL_TS + 123}
 
 
 def test_unknown_ids_are_404_not_500(client):

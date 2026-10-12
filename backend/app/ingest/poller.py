@@ -55,7 +55,7 @@ class LivePoller:
         if status == 200 and not ok:
             data, err = None, "unexpected JSON shape"
         self._backoff(source, 200 if ok else (status if status != 200 else 0))
-        self.rt.on_live_answer(time.time(), source, point, status, ms, err, data)
+        self.rt.on_live_answer(self.rt.clock.now(), source, point, status, ms, err, data)  # the one clock (wall time when live)
 
     async def poll_guarded(self, client, point, source: str) -> bool:
         """poll_one, but an error (e.g. in normalising or injecting) is logged and kept in
