@@ -1,5 +1,7 @@
 """API smoke tests. GAW_AUTOSTART=false (conftest), so no network and no background tasks."""
 import asyncio
+import inspect
+import threading
 import time
 
 import pytest
@@ -287,6 +289,26 @@ def test_simulated_jammer_with_one_real_bad_aircraft_is_injected_and_mixed(clien
     assert b"INJECTED" in pdf  # document subject
     text = pdf_text(pdf)
     assert "INJECTED TEST ATTACK" in text and "Also contains real" in text  # banner + mixed line on the page
+
+
+def test_state_changing_routes_run_on_the_event_loop_thread(client, monkeypatch):
+    """Audit S3: sync routes run in a threadpool and raced the replayer and the tick."""
+    from fastapi.routing import APIRoute
+
+    for route in client.app.routes:
+        if isinstance(route, APIRoute) and (route.methods & {"POST", "PATCH", "DELETE"} or route.path in ("/api/aircraft", "/api/cells")):
+            assert inspect.iscoroutinefunction(route.endpoint), f"{route.methods} {route.path} must be async def"
+
+    rt = client.app.state.rt
+    loop_thread = client.portal.call(threading.get_ident)
+    seen, real = [], rt.persist_ground_truth
+    monkeypatch.setattr(rt, "persist_ground_truth", lambda: (seen.append(threading.get_ident()), real())[1])
+    seed(client)
+    aid = client.post("/api/attacks", json={"kind": "jamming", "center": [31.6, 74.9]}).json()["attack_id"]
+    client.patch(f"/api/attacks/{aid}", json={"strength": 0.5})
+    client.delete(f"/api/attacks/{aid}")
+    client.delete("/api/attacks")
+    assert len(seen) == 4 and set(seen) == {loop_thread}
 
 
 def test_unknown_ids_are_404_not_500(client):

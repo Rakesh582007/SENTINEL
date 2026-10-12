@@ -1,5 +1,9 @@
 """REST API (HANDOVER §8 and §7.1). The WebSocket lives in main.py.
 
+Every route that changes runtime state (or may run compute_tick) is `async def`:
+FastAPI runs those on the event-loop thread, the same thread as the replayer and the
+tick, so they cannot interleave with them. Plain `def` routes run in a threadpool;
+keep them read-only.
 """
 from __future__ import annotations
 
@@ -34,13 +38,13 @@ def health(request: Request):
 
 
 @router.get("/aircraft")
-def aircraft(request: Request):
+async def aircraft(request: Request):
     rt = rt_of(request)
     return (rt.last_tick or rt.compute_tick())["aircraft"]
 
 
 @router.get("/cells")
-def cells(request: Request):
+async def cells(request: Request):
     rt = rt_of(request)
     return (rt.last_tick or rt.compute_tick())["cells"]
 
@@ -73,7 +77,7 @@ def regions(request: Request):
 
 
 @router.post("/region")
-def set_region(body: RegionIn, request: Request):
+async def set_region(body: RegionIn, request: Request):
     rt = rt_of(request)
     try:
         rt.set_region(body.name, body.points)
@@ -112,28 +116,28 @@ def replay_status(request: Request):
 
 
 @router.post("/replay/seek")
-def replay_seek(body: SeekIn, request: Request):
+async def replay_seek(body: SeekIn, request: Request):
     rep = _replayer(request)
     rep.seek(body.ts)
     return rep.status()
 
 
 @router.post("/replay/speed")
-def replay_speed(body: SpeedIn, request: Request):
+async def replay_speed(body: SpeedIn, request: Request):
     rep = _replayer(request)
     rep.set_speed(body.speed)
     return rep.status()
 
 
 @router.post("/replay/pause")
-def replay_pause(request: Request):
+async def replay_pause(request: Request):
     rep = _replayer(request)
     rep.paused = True
     return rep.status()
 
 
 @router.post("/replay/play")
-def replay_play(request: Request):
+async def replay_play(request: Request):
     rep = _replayer(request)
     rep.paused = False
     return rep.status()
@@ -146,7 +150,7 @@ def get_detection_config():
 
 
 @router.patch("/config/detection")
-def patch_detection_config(changes: dict):
+async def patch_detection_config(changes: dict):
     try:
         return update_detection(changes).model_dump()
     except ValidationError as e:
@@ -154,7 +158,7 @@ def patch_detection_config(changes: dict):
 
 
 @router.delete("/config/detection")
-def reset_detection_config():
+async def reset_detection_config():
     return reset_detection().model_dump()
 
 
@@ -173,7 +177,7 @@ def preview_attack(lat: float, lon: float, radius_km: float, request: Request):
 
 
 @router.post("/attacks")
-def create_attack(body: AttackIn, request: Request):
+async def create_attack(body: AttackIn, request: Request):
     try:
         return rt_of(request).create_attack(body.model_dump())
     except LookupError as e:
@@ -181,7 +185,7 @@ def create_attack(body: AttackIn, request: Request):
 
 
 @router.patch("/attacks/{attack_id}")
-def patch_attack(attack_id: str, body: AttackPatch, request: Request):
+async def patch_attack(attack_id: str, body: AttackPatch, request: Request):
     rt = rt_of(request)
     if attack_id not in rt.injector.attacks:
         raise HTTPException(404, f"no attack {attack_id}")
@@ -194,7 +198,7 @@ def patch_attack(attack_id: str, body: AttackPatch, request: Request):
 
 
 @router.delete("/attacks/{attack_id}")
-def delete_attack(attack_id: str, request: Request):
+async def delete_attack(attack_id: str, request: Request):
     rt = rt_of(request)
     a = rt.injector.remove(attack_id, rt.clock.now())
     if a is None:
@@ -205,7 +209,7 @@ def delete_attack(attack_id: str, request: Request):
 
 
 @router.delete("/attacks")
-def reset_attacks(request: Request):
+async def reset_attacks(request: Request):
     rt = rt_of(request)
     ids = rt.injector.reset(rt.clock.now())
     restored = sum(rt.window.restore_injected(i) for i in ids)
@@ -258,7 +262,7 @@ def scenarios(request: Request):
 
 
 @router.post("/scenarios/{scenario_id}/run")
-def run_scenario(scenario_id: str, request: Request):
+async def run_scenario(scenario_id: str, request: Request):
     try:
         return rt_of(request).start_scenario(scenario_id)
     except KeyError as e:
@@ -267,7 +271,7 @@ def run_scenario(scenario_id: str, request: Request):
 
 # ---------------------------------------------------------------- ground sentinel
 @router.post("/sentinel")
-def sentinel_post(body: SentinelIn, request: Request):
+async def sentinel_post(body: SentinelIn, request: Request):
     entry = rt_of(request).add_sentinel(body.model_dump())
     return {"ok": True, "status": entry["status"], "recv_ts": entry["recv_ts"]}
 
