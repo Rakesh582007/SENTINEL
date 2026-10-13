@@ -415,6 +415,7 @@ function tag(cur, pristine, attackId, changes) {
 const BASELINE_S = 120
 const JAM_SNR_DB = 22 // config.sentinel_jam_snr_db
 const JAM_HOLD_S = 6 // config.sentinel_jam_hold_s
+const RULE_VERSION = 3 // sentinel.RULE_VERSION
 const MOVE_M = 50
 const ALT_JUMP_M = 100
 const STATUSES = ['OK', 'SEARCHING', 'JAMMING', 'SPOOF', 'OFFLINE']
@@ -439,8 +440,10 @@ class SentinelStore {
     const dip = low && !jammed ? `signal ${snr.toFixed(1)} dB-Hz, below ${JAM_SNR_DB}, confirming` : null
     if (!fix) {
       st.fix_since = null
-      if (st.last_fix_ts == null) return ['SEARCHING', 'no fix yet']
-      return jammed ? jamWhy() : ['OK', dip || 'no fix, signal normal']
+      if (jammed) return jamWhy()
+      if (dip) return ['OK', dip]
+      if (typeof snr !== 'number') return ['SEARCHING', 'no signal reading yet']
+      return ['OK', 'no fix, signal normal']
     }
     st.last_fix_ts = now
     if (st.fix_since == null) st.fix_since = now
@@ -473,7 +476,7 @@ class SentinelStore {
     const st = this.state.get(device)
     const [serverStatus, why] = this.check(st, packet, recvTs)
     const status = STATUSES.includes(String(packet.status || 'OK').toUpperCase()) ? String(packet.status || 'OK').toUpperCase() : String(packet.status)
-    const entry = { ...packet, id: device, recv_ts: recvTs, status, server_status: serverStatus, server_reason: why, baseline_snr: st.baseline_snr, rule: { jam_snr_db: JAM_SNR_DB, jam_hold_s: JAM_HOLD_S } }
+    const entry = { ...packet, id: device, recv_ts: recvTs, status, server_status: serverStatus, server_reason: why, baseline_snr: st.baseline_snr, rule: { v: RULE_VERSION, jam_snr_db: JAM_SNR_DB, jam_hold_s: JAM_HOLD_S } }
     if (!this.packets.has(device)) this.packets.set(device, [])
     const q = this.packets.get(device)
     q.push(entry)

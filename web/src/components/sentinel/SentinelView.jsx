@@ -191,6 +191,8 @@ function ModeToggle({ mode, setMode }) {
   )
 }
 
+const MIN_RULE_VERSION = 3 // backend sentinel.RULE_VERSION: older backends still use an older rule
+
 function BackendLine({ box }) {
   const connection = useStore((s) => s.connection)
   const up = connection.state === 'open'
@@ -272,7 +274,6 @@ function Body({ box, rows, events, simulated, entries, onSatChange, controls, no
   const snrPoints = rows.map((p) => ({ t: p.recv_ts, v: typeof p.avg_snr === 'number' ? p.avg_snr : null }))
   const satPoints = rows.map((p) => ({ t: p.recv_ts, v: typeof p.sats_used === 'number' ? p.sats_used : null }))
   const refs = [
-    ...(baseline ? [{ label: `normal ${baseline.toFixed(1)}`, value: baseline, color: '#4B5E78' }] : []),
     { label: `jamming < ${JAM_SNR_DB}`, value: JAM_SNR_DB, color: '#E5484D', ink: '#8F1F23' },
   ]
 
@@ -297,7 +298,7 @@ function Body({ box, rows, events, simulated, entries, onSatChange, controls, no
           ) : null}
         </section>
 
-        {!simulated && !box.rule && box.server_status !== 'OFFLINE' ? (
+        {!simulated && !(box.rule?.v >= MIN_RULE_VERSION) && box.server_status !== 'OFFLINE' ? (
           <p role="alert" className="rounded-lg border-2 border-[#E8A33C] bg-[#FFF6E5] px-3 py-2 text-[13.5px] font-semibold leading-snug text-ink-900">
             The backend is running an old copy of the Sentinel rules, so this status can be wrong. Stop uvicorn and start it again (no --reload), then refresh this page.
           </p>
@@ -314,8 +315,8 @@ function Body({ box, rows, events, simulated, entries, onSatChange, controls, no
           <Fact label="Average signal" mono>
             {typeof box.avg_snr === 'number' ? `${box.avg_snr.toFixed(1)} dB-Hz` : '–'}
           </Fact>
-          <Fact label={simulated ? 'Normal level' : 'Baseline'} mono>
-            {baseline ? `${baseline.toFixed(1)} dB-Hz` : 'learning (first 2 min with a fix)'}
+          <Fact label="Jamming level" mono>
+            {`below ${JAM_SNR_DB} dB-Hz for ${JAM_HOLD_S} s`}
           </Fact>
           {simulated ? null : (
             <Fact label="Position" mono>
@@ -327,7 +328,7 @@ function Body({ box, rows, events, simulated, entries, onSatChange, controls, no
         <p className="text-[14px] leading-relaxed text-ink-700">
           {simulated
             ? 'This is a stand-in for the real box, so the rules can be shown without hardware. Switch to Live to see the real one.'
-            : `The box learns its normal satellite signal in its first two minutes with a fix. An average signal below ${JAM_SNR_DB} dB-Hz for ${JAM_HOLD_S} seconds in a row reads as jamming (above it is normal, even if the fix drops); a fixed box that appears to move reads as spoofing. It shows the method on a table; at border airports it would cover the gaps where too few aircraft fly.`}
+            : `The status goes by the average satellite signal alone, with or without a position fix: ${JAM_SNR_DB} dB-Hz or more is normal, below it for ${JAM_HOLD_S} seconds in a row reads as jamming. A fixed box that appears to move reads as spoofing. It shows the method on a table; at border airports it would cover the gaps where too few aircraft fly.`}
         </p>
         {notice}
       </div>
