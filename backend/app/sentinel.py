@@ -5,9 +5,10 @@ history per device, re-checks the alarm rules on the server (so the dashboard
 does not trust the device alone) and reports OFFLINE when packets stop. It
 runs on the wall clock even during replay: the box is real hardware.
 
-Statuses: OK | SEARCHING (no fix yet / no sky view) | JAMMING | SPOOF | OFFLINE.
-SEARCHING exists so a box that never got a fix indoors does not look like a
-jamming alarm (agreed in the hardware session).
+Statuses: OK | SEARCHING | JAMMING | SPOOF | OFFLINE. The judgement is by signal
+alone: average below the jam level (held JAM_HOLD_S) is JAMMING, at or above it
+is OK, with or without a position fix. SEARCHING only means the packet carries no
+signal reading at all (nothing to judge); it no longer depends on the fix.
 
 Server rules (thresholds below):
 - Baseline: once the box has held a fix for BASELINE_S, the median avg_snr and
@@ -32,6 +33,7 @@ from collections import deque
 from app.config import Settings
 from app.detect.geo import haversine_km
 
+RULE_VERSION = 3  # bumped when the rule changes; the dashboard warns when the running backend reports an older one
 STATUSES = ("OK", "SEARCHING", "JAMMING", "SPOOF", "OFFLINE")
 # Defaults of the server rules; the numbers live in config.Settings (sentinel_*), override via GAW_SENTINEL_*.
 BASELINE_S: float = Settings.model_fields["sentinel_baseline_s"].default
@@ -94,11 +96,13 @@ class SentinelStore:
         dip = f"signal {snr:.1f} dB-Hz, below {self.jam_snr_db:.0f}, confirming" if dipping else None
         if not fix:
             st.fix_since = None
-            if st.last_fix_ts is None:  # never had a fix (indoors at start-up): not an alarm
-                return "SEARCHING", "no fix yet"
             if jammed:
                 return "JAMMING", f"signal {snr:.1f} dB-Hz, below {self.jam_snr_db:.0f}"
-            return "OK", dip or "no fix, signal normal"
+            if dip:
+                return "OK", dip
+            if snr is None:  # no signal reading at all: nothing to judge
+                return "SEARCHING", "no signal reading yet"
+            return "OK", "no fix, signal normal"
 
         st.last_fix_ts = now
         if st.fix_since is None:
@@ -134,7 +138,7 @@ class SentinelStore:
         entry = {**packet, "id": device, "recv_ts": recv_ts, "status": normalize_status(packet.get("status")),
                  "server_status": server_status, "server_reason": why, "baseline_snr": st.baseline_snr,
                  # lets the dashboard tell a current backend from a stale one that is still running the old rule
-                 "rule": {"jam_snr_db": self.jam_snr_db, "jam_hold_s": self.jam_hold_s}}
+                 "rule": {"v": RULE_VERSION, "jam_snr_db": self.jam_snr_db, "jam_hold_s": self.jam_hold_s}}
         self.packets.setdefault(device, deque(maxlen=self.max_len)).append(entry)
         return entry
 

@@ -73,9 +73,9 @@ export const SPOOF_EVIDENCE = new Set(['impossible_jump', 'colocation_cluster', 
 export const hasSpoofEvidence = (codes) => Array.isArray(codes) && codes.some((c) => SPOOF_EVIDENCE.has(c))
 
 export const SENTINEL_STATUS = {
-  OK: { label: 'OK', color: '#2EAF6E', ink: '#16613A', words: 'Satellite signal normal.' },
-  SEARCHING: { label: 'Searching', color: '#7D8CA1', ink: '#3E4A5C', words: 'No satellite fix yet. Needs sky view.' },
-  JAMMING: { label: 'Jamming', color: '#E5484D', ink: '#8F1F23', words: 'Signal dropped far below its baseline.' },
+  OK: { label: 'Normal', color: '#2EAF6E', ink: '#16613A', words: 'Satellite signal normal (22 dB-Hz or more).' },
+  SEARCHING: { label: 'Waiting', color: '#7D8CA1', ink: '#3E4A5C', words: 'No signal reading from the box yet.' },
+  JAMMING: { label: 'Jamming', color: '#E5484D', ink: '#8F1F23', words: 'Average satellite signal is below 22 dB-Hz.' },
   SPOOF: { label: 'Spoof', color: '#9B5DE5', ink: '#5B2A9A', words: 'The fixed box appears to move.' },
   OFFLINE: { label: 'Offline', color: '#6B7A90', ink: '#3E4A5C', words: 'No packets from the box in the last 10 s.' },
 }

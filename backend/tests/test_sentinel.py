@@ -12,9 +12,23 @@ def calibrated():
     return s, t
 
 
-def test_no_fix_is_searching_not_jamming():
+def test_no_signal_reading_is_searching_but_a_normal_signal_is_ok_without_a_fix():
     s = SentinelStore(10, 100)
-    assert s.add({**BOX, "fix": False}, 0)["server_status"] == "SEARCHING"
+    assert s.add({"id": "sentinel-1", "fix": False}, 0)["server_status"] == "SEARCHING"
+    e = s.add({**BOX, "fix": False}, 2)  # never had a fix, signal 40: normal
+    assert e["server_status"] == "OK" and e["server_reason"] == "no fix, signal normal"
+
+
+def test_never_had_a_fix_and_signal_below_22_is_jamming_after_the_hold():
+    """13 Oct 06:16 screenshot: 0 of 9 satellites used for 3 hours, average 19 dB-Hz, status stuck on SEARCHING."""
+    s = SentinelStore(10, 100)
+    first = s.add({**BOX, "fix": False, "sats_used": 0, "avg_snr": 19.0}, 0)
+    assert first["server_status"] == "OK" and "confirming" in first["server_reason"]
+    e = None
+    for k in range(1, 5):
+        e = s.add({**BOX, "fix": False, "sats_used": 0, "avg_snr": 19.0}, 2 * k)
+    assert e["server_status"] == "JAMMING"
+    assert s.add({**BOX, "fix": False, "avg_snr": 22.0}, 10)["server_status"] == "OK"
 
 
 def feed(s, t, snr, seconds, **extra):
@@ -73,7 +87,7 @@ def test_screenshot_case_above_22_without_a_fix_is_never_jamming():
 
 def test_each_reading_carries_the_rule_so_a_stale_backend_is_visible():
     e = SentinelStore(10, 100).add(BOX, 0)
-    assert e["rule"] == {"jam_snr_db": 22.0, "jam_hold_s": 6.0}
+    assert e["rule"] == {"v": 3, "jam_snr_db": 22.0, "jam_hold_s": 6.0}
 
 
 def test_jamming_only_below_22_db_hz_not_on_a_drop_from_baseline():
